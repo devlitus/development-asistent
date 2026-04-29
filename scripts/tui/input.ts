@@ -50,6 +50,10 @@ export function parseInputLine(line: string): ParsedLine {
     case "/sessions":
       return { type: "command", command: "sessions" };
     default: {
+      // /resume sin argumento → error de uso
+      if (lower === "/resume") {
+        return { type: "command", command: "resume-missing-id" };
+      }
       // /resume <id> — el ID va en minúsculas concatenado con ":"
       if (lower.startsWith("/resume ")) {
         const id = lower.slice("/resume ".length).trim();

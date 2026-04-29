@@ -127,9 +127,17 @@ export function createTuiOrchestrator(deps: TuiOrchestratorDeps): TuiOrchestrato
   // Tracks whether we've started rendering the current agent message
   let agentMessageStarted = false;
 
+  // A5: stored sigint handler reference so shutdown() can remove it
+  let sigintHandler: (() => void) | null = null;
+
   // ── Shutdown ────────────────────────────────────────────────────────────────
 
   function shutdown(): void {
+    // A5: clean up SIGINT listener to avoid leaks in tests
+    if (sigintHandler) {
+      process.off("SIGINT", sigintHandler);
+      sigintHandler = null;
+    }
     input.close();
     agentProcess.kill();
     renderer.renderSystemMessage("¡Hasta luego!");
@@ -139,6 +147,11 @@ export function createTuiOrchestrator(deps: TuiOrchestratorDeps): TuiOrchestrato
   // ── Handle a user prompt ────────────────────────────────────────────────────
 
   async function handlePrompt(text: string): Promise<void> {
+    // C3: guardia — no enviar si no hay sesión activa
+    if (!sessionId) {
+      renderer.renderError("Sin sesión activa. Usa /new para crear una.");
+      return;
+    }
     renderer.resetScroll(); // Volver al final cuando el usuario envía
     state.setStatus("thinking");
     input.pause();
@@ -304,7 +317,12 @@ export function createTuiOrchestrator(deps: TuiOrchestratorDeps): TuiOrchestrato
 
       case "new-session":
         try {
+          // C1: si el agente está muerto, respawnearlo antes de crear sesión
+          // spawn() es idempotente — si ya está vivo, no hace nada
+          agentProcess.spawn();
           sessionId = await acpClient.newSession(cwd);
+          state.setStatus("idle");                    // C5: transición error → idle
+          renderer.renderStatusBar("idle");           // C5: actualizar badge visual
           renderer.renderSystemMessage(`Nueva sesión iniciada: ${sessionId.slice(0, 8)}…`);
         } catch (err) {
           renderer.renderError(`No se pudo crear nueva sesión: ${err}`);
@@ -324,6 +342,10 @@ export function createTuiOrchestrator(deps: TuiOrchestratorDeps): TuiOrchestrato
 
       case "sessions":
         await handleSessionsList();
+        break;
+
+      case "resume-missing-id":
+        renderer.renderSystemMessage("Uso: /resume <id>  —  usa /sessions para listar IDs");
         break;
 
       default:
@@ -403,7 +425,14 @@ export function createTuiOrchestrator(deps: TuiOrchestratorDeps): TuiOrchestrato
     renderer.renderStatusBar("error");
     agentMessageStarted = false;
     input.resume();
-    doExit(1);
+    // C1: NO llamar doExit(1) inmediatamente — dar opción de recuperación
+    renderer.renderSystemMessage(
+      "El agente se ha detenido. Opciones:\n" +
+      "  /new   — reiniciar el agente y crear nueva sesión\n" +
+      "  /quit  — salir del TUI"
+    );
+    // sessionId queda inválido — la guardia C3 en handlePrompt lo capturará
+    sessionId = "";
   });
 
   // ── Register input handlers ─────────────────────────────────────────────────
@@ -487,6 +516,10 @@ export function createTuiOrchestrator(deps: TuiOrchestratorDeps): TuiOrchestrato
 
     // 4. Start the input loop
     input.start();
+
+    // A5: registrar SIGINT para shutdown limpio (process.once para evitar múltiples registros)
+    sigintHandler = () => { shutdown(); };
+    process.once("SIGINT", sigintHandler);
   }
 
   return { start };

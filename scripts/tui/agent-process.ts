@@ -116,8 +116,13 @@ export class AgentProcess {
    * Spawn the agent child process.
    *
    * Throws if no LLM provider env var is configured.
+   * Idempotent: if the process is already running, does nothing.
    */
   spawn(): void {
+    // C1: idempotente — si el proceso ya está vivo, no hacer nada
+    if (this.#child && !this.#child.killed && this.#child.exitCode === null) {
+      return;
+    }
     this.#assertLlmConfigured();
 
     // Build minimal child environment (FIX-1: SEC-A1)

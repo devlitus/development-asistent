@@ -114,6 +114,7 @@ export class InkInput implements IInput {
       case "new-session":
       case "status":
       case "sessions":
+      case "resume-missing-id":
         this.commandHandlers.forEach((h) => h(command));
         break;
 
@@ -131,7 +132,12 @@ export class InkInput implements IInput {
   handleArrowUp(): void {
     this.setAppState((s) => {
       if (s.pendingPermission) return s;
-      return { ...s, scrollOffset: s.scrollOffset + 1 };
+      // C4: clampar en el setter usando el tamaño actual del array de mensajes
+      // visibleCount aproximado: rows - 6 (header + spinner + input + márgenes)
+      const rows = process.stdout.rows ?? 24;
+      const visibleCount = Math.max(1, rows - 6);
+      const maxOffset = Math.max(0, s.messages.length - visibleCount);
+      return { ...s, scrollOffset: Math.min(s.scrollOffset + 1, maxOffset) };
     });
   }
 
