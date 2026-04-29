@@ -1,0 +1,39 @@
+# Source code — bundled into dist/, not needed in npm package
+src/
+test/
+
+# Documentation and project planning
+docs/
+scripts/
+
+# Build configuration (not needed at runtime)
+*.config.ts
+tsconfig.json
+
+# Bun lockfile (npm uses package-lock.json / yarn.lock)
+bun.lock
+
+# Editor/agent configuration
+.opencode/
+
+# Root-level entry (dev only, production uses dist/)
+index.ts
+
+# Project notes
+pormpt-memoria.md
+
+# Development artifacts
+.github/
+AGENTS.md
+node_modules/
+
+# Sourcemaps — not needed in published package (saves ~3.83 MB)
+dist/*.map
+
+# Sensitive files — never publish secrets or certificates
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
