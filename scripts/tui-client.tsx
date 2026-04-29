@@ -1,25 +1,30 @@
 /**
- * tui-client.ts — TUI-06
+ * tui-client.tsx — INK-06
  *
- * Punto de entrada del TUI interactivo.
+ * Punto de entrada del TUI interactivo con Ink/React.
  *
  * Integra todas las piezas del TUI:
  *   - AgentProcess  (spawn del servidor ACP)
  *   - AcpClient     (protocolo JSON-RPC)
  *   - TuiState      (estado mutable)
- *   - TuiRenderer   (salida ANSI)
- *   - TuiInput      (readline + comandos)
+ *   - InkRenderer   (salida Ink/React)
+ *   - InkInput      (input vía useInput de Ink)
  *
  * Exporta `createTuiOrchestrator(deps)` para testing con dependencias inyectadas.
  * La función `main()` crea las dependencias reales y llama a esta función.
  */
 
+import { render } from "ink";
 import { AgentProcess, LLM_ENV_VARS } from "./tui/agent-process.ts";
 import { AcpClient } from "./tui/acp-client.ts";
 import { TuiState } from "./tui/state.ts";
-import { TuiRenderer } from "./tui/renderer.ts";
-import { TuiInput } from "./tui/input.ts";
+import { TuiApp } from "./tui/ink-renderer.tsx";
+import type { SetAppState } from "./tui/ink-renderer.tsx";
+import { InkRenderer } from "./tui/ink-renderer.tsx";
+import { InkInput } from "./tui/ink-input.ts";
 import type { TuiStatus, TuiMessage, PermissionRequest, SessionUpdatePayload } from "./tui/types.ts";
+import type { IRenderer } from "./tui/interfaces.ts";
+export type { IRenderer } from "./tui/interfaces.ts";
 
 // ─── Dependency interfaces (for injection / testing) ─────────────────────────
 
@@ -38,25 +43,6 @@ export interface IAgentProcess {
   spawn(): void;
   kill(): void;
   onExit(handler: (code: number | null) => void): void;
-}
-
-/** Minimal interface of TuiRenderer used by the orchestrator. */
-export interface IRenderer {
-  renderHeader(version: string): void;
-  renderStatusBar(status: TuiStatus): void;
-  renderUserMessage(text: string): void;
-  renderAgentMessageStart(): void;
-  renderStreamChunk(chunk: string): void;
-  renderAgentMessageEnd(): void;
-  renderSystemMessage(text: string): void;
-  renderError(message: string): void;
-  renderPermissionRequest(req: PermissionRequest): void;
-  renderTurnSeparator(): void;
-  startSpinner(label?: string): void;
-  stopSpinner(): void;
-  renderRoutingInfo(agentName: string): void;
-  renderToolCall(name: string, input: unknown): void;
-  renderToolResult(toolName: string, content: string): void;
 }
 
 /** Minimal interface of TuiInput used by the orchestrator. */
@@ -183,8 +169,8 @@ export function createTuiOrchestrator(deps: TuiOrchestratorDeps): TuiOrchestrato
         break;
 
       case "clear":
-        // Clear screen and re-render header
-        process.stdout.write("\x1b[2J\x1b[H");
+        // Clear messages via renderer (Ink-safe — no raw ANSI escape codes)
+        renderer.clearMessages();
         renderer.renderHeader(version);
         renderer.renderStatusBar("idle");
         break;
@@ -192,7 +178,7 @@ export function createTuiOrchestrator(deps: TuiOrchestratorDeps): TuiOrchestrato
       case "new-session":
         try {
           sessionId = await acpClient.newSession(cwd);
-          renderer.renderSystemMessage(`Nueva sesión iniciada: ${sessionId}`);
+          renderer.renderSystemMessage(`Nueva sesión iniciada: ${sessionId.slice(0, 8)}…`);
         } catch (err) {
           renderer.renderError(`No se pudo crear nueva sesión: ${err}`);
         }
@@ -371,7 +357,7 @@ export function createTuiOrchestrator(deps: TuiOrchestratorDeps): TuiOrchestrato
 // ─── main() ──────────────────────────────────────────────────────────────────
 
 /**
- * Entry point: creates real dependencies and starts the TUI.
+ * Entry point: creates real dependencies using Ink and starts the TUI.
  *
  * Bun loads .env automatically — no dotenv needed.
  */
@@ -389,7 +375,7 @@ async function main(): Promise<void> {
   // Read package version
   let version = "0.1.0";
   try {
-    const pkg = await Bun.file(new URL("../package.json", import.meta.url)).json() as Record<string, unknown>;
+    const pkg = await Bun.file(new URL("../package.json", import.meta.url).pathname).json() as Record<string, unknown>;
     if (typeof pkg["version"] === "string") version = pkg["version"] as string;
   } catch (err) {
     process.stderr.write(`[tui] Warning: no se pudo leer package.json: ${err}\n`);
@@ -416,12 +402,29 @@ async function main(): Promise<void> {
     return "desconocido";
   }
 
-  // Create real dependencies
+  // ── Mount Ink tree and wait for onReady ──────────────────────────────────────
+
+  let resolveReady!: (setState: SetAppState) => void;
+  const readyPromise = new Promise<SetAppState>((resolve) => {
+    resolveReady = resolve;
+  });
+
+  const { unmount } = render(
+    <TuiApp onReady={(setState) => resolveReady(setState)} />,
+  );
+
+  // Wait until TuiApp has mounted and called onReady with setState
+  const setState = await readyPromise;
+
+  // ── Create Ink-based dependencies ────────────────────────────────────────────
+
   const agentProcess = new AgentProcess();
   const acpClient = new AcpClient(agentProcess);
   const state = new TuiState();
-  const renderer = new TuiRenderer();
-  const input = new TuiInput(renderer, state);
+  const renderer = new InkRenderer(setState);
+  const input = new InkInput(setState);
+
+  // ── Create and start orchestrator ────────────────────────────────────────────
 
   const orchestrator = createTuiOrchestrator({
     acpClient,
@@ -432,6 +435,10 @@ async function main(): Promise<void> {
     version,
     cwd: process.cwd(),
     provider: detectProvider(),
+    exit: (code: number) => {
+      unmount();
+      process.exit(code);
+    },
   });
 
   await orchestrator.start();
@@ -439,7 +446,6 @@ async function main(): Promise<void> {
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
 // Only run main() when this file is executed directly (not imported in tests).
-// Bun sets import.meta.main = true when the file is the entry point.
 if (import.meta.main) {
   main().catch((err) => {
     process.stderr.write(`[tui] Fatal: ${err}\n`);

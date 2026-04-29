@@ -1,5 +1,9 @@
 {
   "compilerOptions": {
+    // JSX support (Ink/React TUI)
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
+
     // Environment setup & latest features
     "lib": ["ESNext"],
     "target": "ESNext",

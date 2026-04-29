@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { createTuiOrchestrator } from "../../scripts/tui-client.ts";
+import { createTuiOrchestrator } from "../../scripts/tui-client.tsx";
 import type {
   IAcpClient,
   IAgentProcess,
@@ -7,8 +7,8 @@ import type {
   IInput,
   IState,
   TuiOrchestratorDeps,
-} from "../../scripts/tui-client.ts";
-import type { TuiStatus, TuiMessage, PermissionRequest, SessionUpdatePayload } from "../../scripts/tui/types.ts";
+} from "../../scripts/tui-client.tsx";
+import type { SessionUpdatePayload } from "../../scripts/tui/types.ts";
 
 // ─── Minimal mocks ────────────────────────────────────────────────────────────
 
@@ -49,6 +49,7 @@ function makeRenderer() {
     renderRoutingInfo: (...args) => { calls.push({ method: "renderRoutingInfo", args }); },
     renderToolCall: (...args) => { calls.push({ method: "renderToolCall", args }); },
     renderToolResult: (...args) => { calls.push({ method: "renderToolResult", args }); },
+    clearMessages: (...args) => { calls.push({ method: "clearMessages", args }); },
   };
   return { renderer, calls };
 }
@@ -461,5 +462,48 @@ describe("onUpdate markers", () => {
 
     expect(calls.some((c) => c.method === "renderToolResult" && c.args[0] === "read_file" && c.args[1] === "failed")).toBe(true);
     expect(calls.some((c) => c.method === "renderStreamChunk")).toBe(false);
+  });
+});
+
+// ─── handleCommand("clear") tests ────────────────────────────────────────────
+
+describe("handleCommand clear", () => {
+  it("llama a clearMessages en el renderer (no escribe ANSI a stdout)", async () => {
+    const { renderer, calls } = makeRenderer();
+    const { input, handlers } = makeInput();
+
+    const deps = makeDeps({ renderer, input });
+    const orchestrator = createTuiOrchestrator(deps);
+    await orchestrator.start();
+
+    calls.length = 0;
+
+    for (const h of handlers.command) {
+      await h("clear");
+    }
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(calls.some((c) => c.method === "clearMessages")).toBe(true);
+  });
+
+  it("re-renderiza header y status bar después de clear", async () => {
+    const { renderer, calls } = makeRenderer();
+    const { input, handlers } = makeInput();
+
+    const deps = makeDeps({ renderer, input, version: "2.0.0" });
+    const orchestrator = createTuiOrchestrator(deps);
+    await orchestrator.start();
+
+    calls.length = 0;
+
+    for (const h of handlers.command) {
+      await h("clear");
+    }
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(calls.some((c) => c.method === "renderHeader" && c.args[0] === "2.0.0")).toBe(true);
+    expect(calls.some((c) => c.method === "renderStatusBar" && c.args[0] === "idle")).toBe(true);
   });
 });

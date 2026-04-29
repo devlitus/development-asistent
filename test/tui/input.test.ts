@@ -1,7 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { parseInputLine, TuiInput } from "../../scripts/tui/input.ts";
-import { TuiState } from "../../scripts/tui/state.ts";
-import { TuiRenderer } from "../../scripts/tui/renderer.ts";
+import { parseInputLine } from "../../scripts/tui/input.ts";
 
 describe("parseInputLine", () => {
   it("devuelve empty para línea vacía", () => {
@@ -51,47 +49,5 @@ describe("parseInputLine", () => {
 
   it("trimea espacios en texto normal", () => {
     expect(parseInputLine("  hola  ")).toEqual({ type: "prompt", text: "hola" });
-  });
-});
-
-// ─── Integración: processLine → commandHandlers ───────────────────────────────
-
-describe("TuiInput.processLine integración", () => {
-  function makeTestInput() {
-    const writer = { write: (_s: string) => {} };
-    const renderer = new TuiRenderer(writer);
-    const state = new TuiState();
-    const input = new TuiInput(renderer, state);
-    return { input };
-  }
-
-  it("processLine('/status') dispara commandHandlers con 'status'", () => {
-    const { input } = makeTestInput();
-    const received: string[] = [];
-    input.onCommand((cmd) => received.push(cmd));
-
-    input.processLine("/status");
-
-    expect(received).toEqual(["status"]);
-  });
-
-  it("processLine('/clear') dispara commandHandlers con 'clear'", () => {
-    const { input } = makeTestInput();
-    const received: string[] = [];
-    input.onCommand((cmd) => received.push(cmd));
-
-    input.processLine("/clear");
-
-    expect(received).toEqual(["clear"]);
-  });
-
-  it("processLine('/new') dispara commandHandlers con 'new-session'", () => {
-    const { input } = makeTestInput();
-    const received: string[] = [];
-    input.onCommand((cmd) => received.push(cmd));
-
-    input.processLine("/new");
-
-    expect(received).toEqual(["new-session"]);
   });
 });

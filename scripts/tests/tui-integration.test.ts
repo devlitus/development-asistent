@@ -9,8 +9,8 @@
 
 import { describe, it, expect, jest, beforeEach } from "bun:test";
 import type { SessionUpdatePayload, PermissionRequest } from "../tui/types.ts";
-import type { TuiOrchestratorDeps } from "../tui-client.ts";
-import { createTuiOrchestrator } from "../tui-client.ts";
+import type { TuiOrchestratorDeps } from "../tui-client.tsx";
+import { createTuiOrchestrator } from "../tui-client.tsx";
 
 // ─── Mock helpers ─────────────────────────────────────────────────────────────
 
@@ -92,6 +92,10 @@ function createMockRenderer() {
     clearLine: jest.fn(),
     startSpinner: jest.fn(),
     stopSpinner: jest.fn(),
+    renderRoutingInfo: jest.fn(),
+    renderToolCall: jest.fn(),
+    renderToolResult: jest.fn(),
+    clearMessages: jest.fn(() => { output = ""; }),
     writer,
     getOutput: () => output,
     clearOutput: () => { output = ""; },
