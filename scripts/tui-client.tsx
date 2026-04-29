@@ -15,8 +15,6 @@
  */
 
 import { render } from "ink";
-import { homedir } from "os";
-import { join } from "path";
 import { Database } from "bun:sqlite";
 import { AgentProcess, LLM_ENV_VARS } from "./tui/agent-process.ts";
 import { AcpClient } from "./tui/acp-client.ts";
@@ -30,6 +28,7 @@ import type { IRenderer } from "./tui/interfaces.ts";
 export type { IRenderer } from "./tui/interfaces.ts";
 import { loadConfig } from "../src/config/loader.ts";
 import type { Config, AgentConfig } from "../src/config/schema.ts";
+import { getDbPath } from "../src/persistence/db-path.ts";
 
 // ─── Dependency interfaces (for injection / testing) ─────────────────────────
 
@@ -168,18 +167,6 @@ export function createTuiOrchestrator(deps: TuiOrchestratorDeps): TuiOrchestrato
       renderer.renderTurnSeparator();
       input.resume();
     }
-  }
-
-  // ── DB path helper ──────────────────────────────────────────────────────────
-
-  function getDbPath(): string {
-    // Sigue la convención XDG: ~/.local/share/personal-asistent/data.db
-    // En Windows: %APPDATA%\personal-asistent\data.db
-    const base =
-      process.platform === "win32"
-        ? (process.env["APPDATA"] ?? join(homedir(), "AppData", "Roaming"))
-        : join(homedir(), ".local", "share");
-    return join(base, "personal-asistent", "data.db");
   }
 
   // ── handleSessionsList ──────────────────────────────────────────────────────
