@@ -30,6 +30,8 @@ export class InkInput implements IInput {
       ...s,
       inputEnabled: true,
       onSubmit: (text: string) => this.handleSubmit(text),
+      onArrowUp: () => this.handleArrowUp(),
+      onArrowDown: () => this.handleArrowDown(),
     }));
   }
 
@@ -111,8 +113,32 @@ export class InkInput implements IInput {
       case "clear":
       case "new-session":
       case "status":
+      case "sessions":
         this.commandHandlers.forEach((h) => h(command));
         break;
+
+      default:
+        // resume:<id> — pasa el comando completo a los handlers
+        if (command.startsWith("resume:")) {
+          this.commandHandlers.forEach((h) => h(command));
+        }
+        break;
     }
+  }
+
+  // ─── Scroll helpers (called by useInput in the Ink component) ────────────────
+
+  handleArrowUp(): void {
+    this.setAppState((s) => {
+      if (s.pendingPermission) return s;
+      return { ...s, scrollOffset: s.scrollOffset + 1 };
+    });
+  }
+
+  handleArrowDown(): void {
+    this.setAppState((s) => {
+      if (s.pendingPermission) return s;
+      return { ...s, scrollOffset: Math.max(0, s.scrollOffset - 1) };
+    });
   }
 }

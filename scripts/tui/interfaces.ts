@@ -26,4 +26,6 @@ export interface IRenderer {
   renderToolResult(toolName: string, content: string): void;
   /** Clears all messages and stream buffer (used by /clear command). */
   clearMessages(): void;
+  /** Resets scroll offset to 0 (bottom of conversation). */
+  resetScroll(): void;
 }

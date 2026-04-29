@@ -50,6 +50,7 @@ function makeRenderer() {
     renderToolCall: (...args) => { calls.push({ method: "renderToolCall", args }); },
     renderToolResult: (...args) => { calls.push({ method: "renderToolResult", args }); },
     clearMessages: (...args) => { calls.push({ method: "clearMessages", args }); },
+    resetScroll: (...args) => { calls.push({ method: "resetScroll", args }); },
   };
   return { renderer, calls };
 }
@@ -465,6 +466,39 @@ describe("onUpdate markers", () => {
   });
 });
 
+// ─── handleCommand("help") tests ─────────────────────────────────────────────
+
+describe("handleCommand help", () => {
+  it("llama a renderSystemMessage con el texto de ayuda", async () => {
+    const { renderer, calls } = makeRenderer();
+    const { input, handlers } = makeInput();
+
+    const deps = makeDeps({ renderer, input });
+    const orchestrator = createTuiOrchestrator(deps);
+    await orchestrator.start();
+
+    calls.length = 0;
+
+    for (const h of handlers.command) {
+      await h("help");
+    }
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    const systemMessages = calls
+      .filter((c) => c.method === "renderSystemMessage")
+      .map((c) => c.args[0] as string);
+
+    expect(systemMessages.length).toBeGreaterThan(0);
+    const helpText = systemMessages.join("\n");
+    expect(helpText).toContain("/help");
+    expect(helpText).toContain("/clear");
+    expect(helpText).toContain("/new");
+    expect(helpText).toContain("/status");
+    expect(helpText).toContain("/quit");
+  });
+});
+
 // ─── handleCommand("clear") tests ────────────────────────────────────────────
 
 describe("handleCommand clear", () => {
@@ -505,5 +539,130 @@ describe("handleCommand clear", () => {
 
     expect(calls.some((c) => c.method === "renderHeader" && c.args[0] === "2.0.0")).toBe(true);
     expect(calls.some((c) => c.method === "renderStatusBar" && c.args[0] === "idle")).toBe(true);
+  });
+});
+
+// ─── handleCommand("sessions") tests ─────────────────────────────────────────
+
+describe("handleCommand sessions", () => {
+  it("renderiza mensaje de error/info cuando la DB no existe", async () => {
+    const { renderer, calls } = makeRenderer();
+    const { input, handlers } = makeInput();
+
+    const deps = makeDeps({ renderer, input });
+    const orchestrator = createTuiOrchestrator(deps);
+    await orchestrator.start();
+
+    calls.length = 0;
+
+    for (const h of handlers.command) {
+      await h("sessions");
+    }
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    const systemMessages = calls
+      .filter((c) => c.method === "renderSystemMessage")
+      .map((c) => c.args[0] as string);
+
+    // Debe haber al menos un mensaje (error de DB o "no hay sesiones")
+    expect(systemMessages.length).toBeGreaterThan(0);
+    // No debe crashear — el mensaje debe ser un string
+    expect(typeof systemMessages[0]).toBe("string");
+  });
+
+  it("no llama a renderError cuando la DB no existe (manejo gracioso)", async () => {
+    const { renderer, calls } = makeRenderer();
+    const { input, handlers } = makeInput();
+
+    const deps = makeDeps({ renderer, input });
+    const orchestrator = createTuiOrchestrator(deps);
+    await orchestrator.start();
+
+    calls.length = 0;
+
+    for (const h of handlers.command) {
+      await h("sessions");
+    }
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    // El error se muestra via renderSystemMessage, no renderError
+    const errorCalls = calls.filter((c) => c.method === "renderError");
+    expect(errorCalls.length).toBe(0);
+  });
+});
+
+// ─── handleCommand("resume:<id>") tests ──────────────────────────────────────
+
+describe("handleCommand resume", () => {
+  it("renderiza mensaje de error/info cuando la DB no existe", async () => {
+    const { renderer, calls } = makeRenderer();
+    const { input, handlers } = makeInput();
+
+    const deps = makeDeps({ renderer, input });
+    const orchestrator = createTuiOrchestrator(deps);
+    await orchestrator.start();
+
+    calls.length = 0;
+
+    for (const h of handlers.command) {
+      await h("resume:abc12345");
+    }
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    const systemMessages = calls
+      .filter((c) => c.method === "renderSystemMessage")
+      .map((c) => c.args[0] as string);
+
+    expect(systemMessages.length).toBeGreaterThan(0);
+    expect(typeof systemMessages[0]).toBe("string");
+  });
+
+  it("no llama a renderError cuando la DB no existe (manejo gracioso)", async () => {
+    const { renderer, calls } = makeRenderer();
+    const { input, handlers } = makeInput();
+
+    const deps = makeDeps({ renderer, input });
+    const orchestrator = createTuiOrchestrator(deps);
+    await orchestrator.start();
+
+    calls.length = 0;
+
+    for (const h of handlers.command) {
+      await h("resume:abc12345");
+    }
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    const errorCalls = calls.filter((c) => c.method === "renderError");
+    expect(errorCalls.length).toBe(0);
+  });
+});
+
+describe("handlePrompt resetScroll", () => {
+  it("handlePrompt llama a renderer.resetScroll() antes de enviar el prompt", async () => {
+    const { renderer, calls } = makeRenderer();
+    const { input, handlers } = makeInput();
+
+    const deps = makeDeps({ renderer, input, env: {} });
+    const orchestrator = createTuiOrchestrator(deps);
+    await orchestrator.start();
+
+    calls.length = 0;
+
+    // Trigger a prompt via the input handler
+    for (const h of handlers.prompt) {
+      await h("hola agente");
+    }
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(calls.some((c) => c.method === "resetScroll")).toBe(true);
+    // resetScroll debe llamarse antes de renderUserMessage
+    const resetIdx = calls.findIndex((c) => c.method === "resetScroll");
+    const userMsgIdx = calls.findIndex((c) => c.method === "renderUserMessage");
+    expect(resetIdx).toBeLessThan(userMsgIdx);
   });
 });

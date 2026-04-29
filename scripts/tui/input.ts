@@ -47,7 +47,17 @@ export function parseInputLine(line: string): ParsedLine {
       return { type: "command", command: "help" };
     case "/status":
       return { type: "command", command: "status" };
-    default:
+    case "/sessions":
+      return { type: "command", command: "sessions" };
+    default: {
+      // /resume <id> — el ID va en minúsculas concatenado con ":"
+      if (lower.startsWith("/resume ")) {
+        const id = lower.slice("/resume ".length).trim();
+        if (id.length > 0) {
+          return { type: "command", command: `resume:${id}` };
+        }
+      }
       return { type: "prompt", text: trimmed };
+    }
   }
 }

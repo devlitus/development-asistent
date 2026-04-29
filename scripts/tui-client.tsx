@@ -15,6 +15,9 @@
  */
 
 import { render } from "ink";
+import { homedir } from "os";
+import { join } from "path";
+import { Database } from "bun:sqlite";
 import { AgentProcess, LLM_ENV_VARS } from "./tui/agent-process.ts";
 import { AcpClient } from "./tui/acp-client.ts";
 import { TuiState } from "./tui/state.ts";
@@ -25,6 +28,8 @@ import { InkInput } from "./tui/ink-input.ts";
 import type { TuiStatus, TuiMessage, PermissionRequest, SessionUpdatePayload } from "./tui/types.ts";
 import type { IRenderer } from "./tui/interfaces.ts";
 export type { IRenderer } from "./tui/interfaces.ts";
+import { loadConfig } from "../src/config/loader.ts";
+import type { Config, AgentConfig } from "../src/config/schema.ts";
 
 // ─── Dependency interfaces (for injection / testing) ─────────────────────────
 
@@ -55,6 +60,10 @@ export interface IInput {
   onPrompt(handler: (text: string) => void): void;
   onCommand(handler: (cmd: string) => void): void;
   onQuit(handler: () => void): void;
+  /** Desplaza el scroll de la conversación una línea hacia arriba. */
+  handleArrowUp?(): void;
+  /** Desplaza el scroll de la conversación una línea hacia abajo. */
+  handleArrowDown?(): void;
 }
 
 /** Minimal interface of TuiState used by the orchestrator. */
@@ -131,6 +140,7 @@ export function createTuiOrchestrator(deps: TuiOrchestratorDeps): TuiOrchestrato
   // ── Handle a user prompt ────────────────────────────────────────────────────
 
   async function handlePrompt(text: string): Promise<void> {
+    renderer.resetScroll(); // Volver al final cuando el usuario envía
     state.setStatus("thinking");
     input.pause();
     renderer.renderUserMessage(text);
@@ -160,10 +170,140 @@ export function createTuiOrchestrator(deps: TuiOrchestratorDeps): TuiOrchestrato
     }
   }
 
+  // ── DB path helper ──────────────────────────────────────────────────────────
+
+  function getDbPath(): string {
+    // Sigue la convención XDG: ~/.local/share/personal-asistent/data.db
+    // En Windows: %APPDATA%\personal-asistent\data.db
+    const base =
+      process.platform === "win32"
+        ? (process.env["APPDATA"] ?? join(homedir(), "AppData", "Roaming"))
+        : join(homedir(), ".local", "share");
+    return join(base, "personal-asistent", "data.db");
+  }
+
+  // ── handleSessionsList ──────────────────────────────────────────────────────
+
+  async function handleSessionsList(): Promise<void> {
+    try {
+      const dbPath = getDbPath();
+      const db = new Database(dbPath, { readonly: true });
+      const rows = db.query<{
+        id: string;
+        created_at: number;
+        msg_count: number;
+        first_user_msg: string | null;
+      }, []>(`
+        SELECT s.id, s.created_at, COUNT(m.id) as msg_count,
+               MIN(CASE WHEN m.role='user' THEN m.content END) as first_user_msg
+        FROM sessions s
+        LEFT JOIN messages m ON m.session_id = s.id
+        GROUP BY s.id
+        ORDER BY s.created_at DESC
+        LIMIT 10
+      `).all();
+      db.close();
+
+      if (rows.length === 0) {
+        renderer.renderSystemMessage("No hay sesiones anteriores.");
+        return;
+      }
+
+      const lines = rows.map((r) => {
+        const shortId = r.id.slice(0, 8);
+        const date = new Date(r.created_at).toLocaleDateString("es-ES", {
+          month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+        });
+        // Sanitizar escape codes ANSI del preview para evitar corrupción del TUI
+        const rawPreview = r.first_user_msg
+          ? r.first_user_msg.slice(0, 60) + (r.first_user_msg.length > 60 ? "…" : "")
+          : "(sin mensajes)";
+        // eslint-disable-next-line no-control-regex
+        const preview = rawPreview.replace(/\x1b\[[0-9;]*[mGKHF]/g, "");
+        return `  ${shortId}  ${date}  [${r.msg_count} msgs]  ${preview}`;
+      });
+
+      renderer.renderSystemMessage(
+        `Sesiones recientes:\n${lines.join("\n")}\n\nUsa /resume <id> para reanudar`
+      );
+    } catch (err) {
+      renderer.renderSystemMessage(`No se pudo leer el historial: ${err}`);
+    }
+  }
+
+  // ── handleSessionResume ─────────────────────────────────────────────────────
+
+  async function handleSessionResume(shortId: string): Promise<void> {
+    // Validar que shortId sea un prefijo hex UUID (solo [0-9a-f-])
+    if (!/^[0-9a-f-]{1,36}$/i.test(shortId)) {
+      renderer.renderSystemMessage(
+        `ID inválido: '${shortId}'. Usa el ID corto de /sessions (ej: 84c3ffe2).`
+      );
+      return;
+    }
+
+    try {
+      const dbPath = getDbPath();
+      const db = new Database(dbPath, { readonly: true });
+
+      // Escapar metacaracteres LIKE (%, _, \) para evitar wildcards no intencionados
+      const escapedId = shortId.replace(/[%_\\]/g, "\\$&");
+      const session = db.query<{ id: string }, [string]>(
+        `SELECT id FROM sessions WHERE id LIKE ? ESCAPE '\\' LIMIT 1`
+      ).get(`${escapedId}%`);
+
+      if (!session) {
+        renderer.renderSystemMessage(
+          `Sesión '${shortId}' no encontrada. Usa /sessions para listar.`
+        );
+        db.close();
+        return;
+      }
+
+      const messages = db.query<{ role: string; content: string }, [string]>(
+        `SELECT role, content FROM messages WHERE session_id = ? ORDER BY created_at DESC LIMIT 5`
+      ).all(session.id);
+      db.close();
+
+      // Actualizar sessionId local
+      sessionId = session.id;
+      renderer.renderSystemMessage(
+        `Reanudando sesión ${session.id.slice(0, 8)}…\n` +
+        `Nota: el contexto LLM empieza fresco; solo se muestra historial visual.`
+      );
+
+      // Mostrar últimos mensajes en orden cronológico
+      for (const msg of messages.reverse()) {
+        if (msg.role === "user") {
+          renderer.renderUserMessage(msg.content);
+        } else if (msg.role === "assistant") {
+          renderer.renderAgentMessageStart();
+          renderer.renderStreamChunk(msg.content);
+          renderer.renderAgentMessageEnd();
+        }
+      }
+    } catch (err) {
+      renderer.renderSystemMessage(`Error al reanudar sesión: ${err}`);
+    }
+  }
+
   // ── Handle a command ────────────────────────────────────────────────────────
 
   async function handleCommand(cmd: string): Promise<void> {
     switch (cmd) {
+      case "help":
+        renderer.renderSystemMessage(
+          "Comandos disponibles:\n" +
+          "  /help         — muestra esta ayuda\n" +
+          "  /clear        — limpia la pantalla\n" +
+          "  /new          — inicia una nueva sesión\n" +
+          "  /status       — muestra info de sesión y provider\n" +
+          "  /sessions     — lista las últimas 10 sesiones\n" +
+          "  /resume <id>  — reanuda una sesión por su ID corto\n" +
+          "  /quit         — sale del TUI"
+        );
+        break;
+
       case "quit":
         shutdown();
         break;
@@ -194,6 +334,17 @@ export function createTuiOrchestrator(deps: TuiOrchestratorDeps): TuiOrchestrato
         renderer.renderSystemMessage(`${sessionLine}\n${providerLine}`);
         break;
       }
+
+      case "sessions":
+        await handleSessionsList();
+        break;
+
+      default:
+        if (cmd.startsWith("resume:")) {
+          const shortId = cmd.slice("resume:".length);
+          await handleSessionResume(shortId);
+        }
+        break;
     }
   }
 
@@ -382,24 +533,12 @@ async function main(): Promise<void> {
   }
 
   // Detect active LLM provider
-  function sanitizeHostUrl(url: string): string {
-    try {
-      const parsed = new URL(url);
-      parsed.username = "";
-      parsed.password = "";
-      return parsed.toString();
-    } catch {
-      return url;
-    }
-  }
-
-  function detectProvider(): string {
-    if (process.env["ANTHROPIC_API_KEY"]) return "Anthropic";
-    if (process.env["OPENAI_API_KEY"]) return "OpenAI";
-    if (process.env["LM_STUDIO_HOST"]) return `LM Studio (${sanitizeHostUrl(process.env["LM_STUDIO_HOST"])})`;
-    if (process.env["LLAMACPP_HOST"]) return `llama.cpp (${sanitizeHostUrl(process.env["LLAMACPP_HOST"])})`;
-    if (process.env["OLLAMA_HOST"]) return `Ollama (${sanitizeHostUrl(process.env["OLLAMA_HOST"])})`;
-    return "desconocido";
+  let config: Config | undefined;
+  let configError: string | undefined;
+  try {
+    config = loadConfig();
+  } catch (err) {
+    configError = String(err);
   }
 
   // ── Mount Ink tree and wait for onReady ──────────────────────────────────────
@@ -434,7 +573,7 @@ async function main(): Promise<void> {
     state,
     version,
     cwd: process.cwd(),
-    provider: detectProvider(),
+    provider: detectProvider(config),
     exit: (code: number) => {
       unmount();
       process.exit(code);
@@ -442,10 +581,51 @@ async function main(): Promise<void> {
   });
 
   await orchestrator.start();
+
+  // Show config warning if loadConfig() failed
+  if (configError) {
+    renderer.renderSystemMessage(`⚠ config.toml inválido: ${configError}`);
+  }
 }
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
 // Only run main() when this file is executed directly (not imported in tests).
+
+// ─── Helpers used by main() and exported for testing ─────────────────────────
+
+function sanitizeHostUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    parsed.username = "";
+    parsed.password = "";
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * Detects the active LLM provider.
+ * Priority: config.toml (agents.orchestrator) > env vars > "desconocido"
+ */
+export function detectProvider(cfg?: Config): string {
+  // Primero intentar config.toml
+  const orchCfg: AgentConfig | undefined = cfg?.agents?.["orchestrator"];
+  if (orchCfg?.provider && orchCfg?.model) {
+    return `${orchCfg.provider} · ${orchCfg.model}`;
+  }
+  if (orchCfg?.provider) {
+    return orchCfg.provider;
+  }
+  // Fallback: env vars
+  if (process.env["ANTHROPIC_API_KEY"]) return "Anthropic";
+  if (process.env["OPENAI_API_KEY"]) return "OpenAI";
+  if (process.env["LM_STUDIO_HOST"]) return `LM Studio (${sanitizeHostUrl(process.env["LM_STUDIO_HOST"])})`;
+  if (process.env["LLAMACPP_HOST"]) return `llama.cpp (${sanitizeHostUrl(process.env["LLAMACPP_HOST"])})`;
+  if (process.env["OLLAMA_HOST"]) return `Ollama (${sanitizeHostUrl(process.env["OLLAMA_HOST"])})`;
+  return "desconocido";
+}
+
 if (import.meta.main) {
   main().catch((err) => {
     process.stderr.write(`[tui] Fatal: ${err}\n`);

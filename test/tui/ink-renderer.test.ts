@@ -21,6 +21,7 @@ function makeRenderer(): { renderer: InkRenderer; getState: () => TuiAppState } 
     isThinking: false,
     inputValue: "",
     inputEnabled: true,
+    scrollOffset: 0,
   };
 
   const setAppState = (updater: TuiAppState | ((s: TuiAppState) => TuiAppState)) => {
@@ -212,5 +213,32 @@ describe("InkRenderer", () => {
     const state = getState();
     expect(state.version).toBe("3.0.0");
     expect(state.status).toBe("thinking");
+  });
+
+  // ── scrollOffset ─────────────────────────────────────────────────────────────
+
+  it("scrollOffset inicial es 0", () => {
+    expect(getState().scrollOffset).toBe(0);
+  });
+
+  it("resetScroll pone scrollOffset a 0", () => {
+    // Simular que el offset fue modificado directamente en el estado
+    // (como lo haría ink-input al presionar flechas)
+    let state = getState();
+    // Mutamos el estado directamente para simular que se incrementó
+    const setAppState = (updater: TuiAppState | ((s: TuiAppState) => TuiAppState)) => {
+      if (typeof updater === "function") {
+        state = updater(state);
+      } else {
+        state = updater;
+      }
+    };
+    const r2 = new InkRenderer(setAppState);
+    // Forzar scrollOffset a 5 directamente
+    setAppState((s) => ({ ...s, scrollOffset: 5 }));
+    expect(state.scrollOffset).toBe(5);
+
+    r2.resetScroll();
+    expect(state.scrollOffset).toBe(0);
   });
 });

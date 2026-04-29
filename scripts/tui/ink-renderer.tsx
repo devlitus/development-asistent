@@ -44,6 +44,10 @@ export interface TuiAppState {
   onSubmit?: (text: string) => void;
   pendingPermission?: PermissionRequest;
   onPermissionResponse?: (answer: string) => void;
+  scrollOffset: number; // 0 = al final, N = N mensajes desde el final
+  /** Callbacks de scroll inyectados por InkInput.start() */
+  onArrowUp?: () => void;
+  onArrowDown?: () => void;
 }
 
 export const initialTuiAppState: TuiAppState = {
@@ -56,6 +60,7 @@ export const initialTuiAppState: TuiAppState = {
   inputEnabled: true,
   pendingPermission: undefined,
   onPermissionResponse: undefined,
+  scrollOffset: 0,
 };
 
 // ─── SetAppState type ─────────────────────────────────────────────────────────
@@ -187,6 +192,10 @@ export class InkRenderer implements IRenderer {
   clearMessages(): void {
     this.setAppState((s) => ({ ...s, messages: [], streamBuffer: "" }));
   }
+
+  resetScroll(): void {
+    this.setAppState((s) => ({ ...s, scrollOffset: 0 }));
+  }
 }
 
 // ─── TuiApp ───────────────────────────────────────────────────────────────────
@@ -215,12 +224,15 @@ export function TuiApp({ onReady }: TuiAppProps): React.ReactElement {
         <ConversationArea
           messages={state.messages}
           streamBuffer={state.streamBuffer}
+          scrollOffset={state.scrollOffset}
         />
       </Box>
       <SpinnerLine active={state.isThinking} />
       <InputLine
         enabled={state.inputEnabled}
         onSubmit={state.onSubmit ?? (() => {})}
+        onArrowUp={state.onArrowUp}
+        onArrowDown={state.onArrowDown}
       />
     </Box>
   );

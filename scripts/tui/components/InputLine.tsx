@@ -14,15 +14,22 @@ import { Box, Text, useInput } from "ink";
 interface InputLineProps {
   enabled: boolean;
   onSubmit: (text: string) => void;
+  /** Callback de scroll — inyectado por InkInput a través de TuiAppState */
+  onArrowUp?: () => void;
+  onArrowDown?: () => void;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function InputLine({ enabled, onSubmit }: InputLineProps): React.ReactElement {
+export function InputLine({ enabled, onSubmit, onArrowUp, onArrowDown }: InputLineProps): React.ReactElement {
   const [buffer, setBuffer] = useState("");
 
   useInput(
     (input, key) => {
+      // Flechas de scroll — activas incluso cuando el input está pausado
+      if (key.upArrow) { onArrowUp?.(); return; }
+      if (key.downArrow) { onArrowDown?.(); return; }
+
       if (!enabled) return;
 
       if (key.return) {
@@ -44,7 +51,7 @@ export function InputLine({ enabled, onSubmit }: InputLineProps): React.ReactEle
 
       setBuffer((prev) => prev + input);
     },
-    { isActive: enabled },
+    { isActive: true }, // siempre activo para capturar flechas
   );
 
   return (

@@ -50,4 +50,32 @@ describe("parseInputLine", () => {
   it("trimea espacios en texto normal", () => {
     expect(parseInputLine("  hola  ")).toEqual({ type: "prompt", text: "hola" });
   });
+
+  // ─── /sessions ───────────────────────────────────────────────────────────────
+
+  it("devuelve command sessions para /sessions", () => {
+    expect(parseInputLine("/sessions")).toEqual({ type: "command", command: "sessions" });
+  });
+
+  it("devuelve command sessions para /SESSIONS (normalización a lowercase)", () => {
+    expect(parseInputLine("/SESSIONS")).toEqual({ type: "command", command: "sessions" });
+  });
+
+  // ─── /resume ─────────────────────────────────────────────────────────────────
+
+  it("devuelve command resume:abc12345 para /resume abc12345", () => {
+    expect(parseInputLine("/resume abc12345")).toEqual({ type: "command", command: "resume:abc12345" });
+  });
+
+  it("devuelve command resume con ID en minúsculas para /resume ABC12345", () => {
+    expect(parseInputLine("/resume ABC12345")).toEqual({ type: "command", command: "resume:abc12345" });
+  });
+
+  it("devuelve prompt para /resume sin ID (sin argumento)", () => {
+    expect(parseInputLine("/resume")).toEqual({ type: "prompt", text: "/resume" });
+  });
+
+  it("devuelve prompt para /resume con solo espacios (sin ID real)", () => {
+    expect(parseInputLine("/resume   ")).toEqual({ type: "prompt", text: "/resume" });
+  });
 });

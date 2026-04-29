@@ -17,6 +17,9 @@ function makeInput(): {
   input: InkInput;
   getState: () => TuiAppState;
   simulateSubmit: (text: string) => void;
+  simulateArrowUp: () => void;
+  simulateArrowDown: () => void;
+  simulatePermissionActive: (req: PermissionRequest) => void;
 } {
   let state: TuiAppState = { ...initialTuiAppState };
 
@@ -35,7 +38,22 @@ function makeInput(): {
     state.onSubmit?.(text);
   };
 
-  return { input, getState: () => state, simulateSubmit };
+  // Simula tecla flecha arriba (como lo haría useInput de Ink)
+  const simulateArrowUp = () => {
+    input.handleArrowUp();
+  };
+
+  // Simula tecla flecha abajo
+  const simulateArrowDown = () => {
+    input.handleArrowDown();
+  };
+
+  // Simula que hay un permiso pendiente activo
+  const simulatePermissionActive = (req: PermissionRequest) => {
+    setAppState((s) => ({ ...s, pendingPermission: req }));
+  };
+
+  return { input, getState: () => state, simulateSubmit, simulateArrowUp, simulateArrowDown, simulatePermissionActive };
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -44,9 +62,12 @@ describe("InkInput", () => {
   let input: InkInput;
   let getState: () => TuiAppState;
   let simulateSubmit: (text: string) => void;
+  let simulateArrowUp: () => void;
+  let simulateArrowDown: () => void;
+  let simulatePermissionActive: (req: PermissionRequest) => void;
 
   beforeEach(() => {
-    ({ input, getState, simulateSubmit } = makeInput());
+    ({ input, getState, simulateSubmit, simulateArrowUp, simulateArrowDown, simulatePermissionActive } = makeInput());
   });
 
   // ── start() ─────────────────────────────────────────────────────────────────
@@ -227,5 +248,53 @@ describe("InkInput", () => {
     getState().onPermissionResponse?.("");
     const result = await promise;
     expect(result).toBe(false);
+  });
+
+  // ── scrollOffset via setAppState ─────────────────────────────────────────────
+
+  it("scrollUpArrow incrementa scrollOffset cuando no hay pendingPermission", () => {
+    input.start();
+    simulateArrowUp();
+    expect(getState().scrollOffset).toBe(1);
+  });
+
+  it("scrollUpArrow incrementa scrollOffset acumulativamente", () => {
+    input.start();
+    simulateArrowUp();
+    simulateArrowUp();
+    simulateArrowUp();
+    expect(getState().scrollOffset).toBe(3);
+  });
+
+  it("scrollDownArrow decrementa scrollOffset (mínimo 0)", () => {
+    input.start();
+    simulateArrowUp();
+    simulateArrowUp();
+    simulateArrowDown();
+    expect(getState().scrollOffset).toBe(1);
+  });
+
+  it("scrollDownArrow no baja de 0", () => {
+    input.start();
+    simulateArrowDown();
+    expect(getState().scrollOffset).toBe(0);
+  });
+
+  it("scrollUpArrow NO actúa cuando hay pendingPermission activo", () => {
+    const req: PermissionRequest = {
+      sessionId: "s1",
+      toolName: "bash",
+      description: "test",
+      input: {},
+    };
+    input.start();
+    // Activar pendingPermission directamente en el estado
+    simulateArrowUp(); // primero sin permiso → debe funcionar
+    expect(getState().scrollOffset).toBe(1);
+
+    // Ahora simular que hay un permiso pendiente
+    simulatePermissionActive(req);
+    simulateArrowUp(); // con permiso → NO debe cambiar
+    expect(getState().scrollOffset).toBe(1);
   });
 });
