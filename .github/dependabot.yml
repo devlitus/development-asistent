@@ -1,0 +1,19 @@
+version: 2
+updates:
+  # Keep GitHub Actions up to date (CI-01)
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+      - github-actions
+
+  # Keep npm dependencies up to date
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+      - npm

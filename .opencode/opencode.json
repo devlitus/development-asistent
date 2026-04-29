@@ -1,0 +1,125 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "default_agent": "orchestrator",
+  "agent": {
+    "orchestrator": {
+      "mode": "primary",
+      "description": "Orquestador maestro que coordina todo el workflow de desarrollo",
+      "color": "#FF6B6B",
+      "temperature": 0.2,
+      "permission": {
+        "edit": "allow",
+        "bash": {
+          "*": "ask",
+          "bun *": "allow",
+          "git status*": "allow",
+          "git log*": "allow",
+          "mkdir*": "allow"
+        },
+        "task": {
+          "*": "allow"
+        }
+      }
+    },
+    "architecto": {
+      "mode": "subagent",
+      "description": "Arquitecto visionario que diseña sistemas y divide en tareas manejables",
+      "color": "#4A90E2",
+      "temperature": 0.2,
+      "permission": {
+        "edit": "allow",
+        "bash": {
+          "mkdir*": "allow"
+        },
+        "task": {
+          "*": "deny"
+        }
+      }
+    },
+    "code-smith": {
+      "mode": "subagent",
+      "description": "Artesano del código que implementa con TDD siguiendo tareas definidas",
+      "color": "#F0DB4F",
+      "temperature": 0.3,
+      "permission": {
+        "edit": "allow",
+        "bash": {
+          "*": "ask",
+          "bun *": "allow",
+          "bun test*": "allow"
+        },
+        "task": {
+          "*": "deny"
+        }
+      }
+    },
+    "type-sheriff": {
+      "mode": "subagent",
+      "description": "Guardián de calidad TypeScript que revisa implementaciones",
+      "color": "#E74C3C",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "deny",
+        "bash": {
+          "git diff*": "allow",
+          "git log*": "allow",
+          "grep*": "allow"
+        },
+        "task": {
+          "*": "deny"
+        }
+      }
+    },
+    "test-mancer": {
+      "mode": "subagent",
+      "description": "Maestro de tests que busca edge cases y verifica cobertura",
+      "color": "#2ECC71",
+      "temperature": 0.2,
+      "permission": {
+        "edit": "ask",
+        "bash": {
+          "bun test*": "allow",
+          "bun run test*": "allow"
+        },
+        "task": {
+          "*": "deny"
+        }
+      }
+    },
+    "perf-wizard": {
+      "mode": "subagent",
+      "description": "Mago de la optimización que mejora rendimiento sin romper funcionalidad",
+      "color": "#9B59B6",
+      "temperature": 0.2,
+      "permission": {
+        "edit": "ask",
+        "bash": {
+          "bun --hot*": "allow",
+          "bun build*": "allow",
+          "bun run benchmark*": "allow"
+        },
+        "task": {
+          "*": "deny"
+        }
+      }
+    },
+    "security-guardian": {
+      "mode": "subagent",
+      "description": "Guardián de seguridad que audita código en busca de vulnerabilidades, secrets filtrados y malas prácticas de seguridad",
+      "color": "#F39C12",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "ask",
+        "bash": {
+          "git diff*": "allow",
+          "git log*": "allow",
+          "grep*": "allow",
+          "find*": "allow"
+        },
+        "task": {
+          "*": "deny"
+        }
+      }
+    }
+  }
+}
