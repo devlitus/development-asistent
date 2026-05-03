@@ -13,16 +13,17 @@ import Spinner from "ink-spinner";
 
 interface SpinnerLineProps {
   active: boolean;
+  label?: string; // M4: label dinámico
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function SpinnerLine({ active }: SpinnerLineProps): React.ReactElement {
+export function SpinnerLine({ active, label }: SpinnerLineProps): React.ReactElement {
   if (active) {
     return (
       <Box>
         <Spinner type="dots" />
-        <Text color="blue"> Pensando...</Text>
+        <Text color="blue"> {label ?? "Pensando..."}</Text>
       </Box>
     );
   }

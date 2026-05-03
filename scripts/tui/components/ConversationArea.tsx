@@ -9,14 +9,14 @@
  * ya que ink-markdown usa require() CJS incompatible con Bun/ESM).
  */
 
-import React from "react";
-import { Box, Text } from "ink";
+import React, { useMemo } from "react";
+import { Box, Text, useStdout } from "ink";
 import type { DisplayMessage } from "../ink-renderer.tsx";
 import type { PermissionRequest } from "../types.ts";
 
 // ─── Markdown parser ──────────────────────────────────────────────────────────
 
-export type MarkdownLineStyle = "normal" | "h1" | "h2" | "h3" | "code";
+export type MarkdownLineStyle = "normal" | "h1" | "h2" | "h3" | "code" | "code_label" | "list";
 
 export interface MarkdownLine {
   text: string;
@@ -36,10 +36,18 @@ export function parseMarkdownLines(text: string): MarkdownLine[] {
   let inCodeBlock = false;
 
   for (const line of rawLines) {
-    // Toggle de bloque de código
+    // A6: Toggle de bloque de código — suprimir fence lines del output
     if (line.startsWith("```")) {
       inCodeBlock = !inCodeBlock;
-      result.push({ text: line, style: "code" });
+      if (inCodeBlock) {
+        // Apertura: extraer lenguaje si existe (ej: "typescript" de "```typescript")
+        const lang = line.slice(3).trim();
+        if (lang) {
+          result.push({ text: `[${lang}]`, style: "code_label" });
+        }
+        // Si no hay lenguaje, no añadir nada
+      }
+      // Cierre: no añadir nada
       continue;
     }
 
@@ -51,6 +59,12 @@ export function parseMarkdownLines(text: string): MarkdownLine[] {
     // Indentación de 4 espacios → código
     if (line.startsWith("    ")) {
       result.push({ text: line, style: "code" });
+      continue;
+    }
+
+    // A7: Listas — "- " o "* " al inicio de línea
+    if (line.startsWith("- ") || line.startsWith("* ")) {
+      result.push({ text: line.slice(2), style: "list" });
       continue;
     }
 
@@ -73,6 +87,38 @@ export function parseMarkdownLines(text: string): MarkdownLine[] {
   }
 
   return result;
+}
+
+// ─── renderInline ─────────────────────────────────────────────────────────────
+
+/**
+ * Parsea markdown inline: **bold** y `code`.
+ * Retorna un array de React.ReactNode para usar dentro de <Text>.
+ * Nunca lanza — markdown incompleto se trata como texto plano.
+ */
+function renderInline(text: string): React.ReactNode {
+  const pattern = /(\*\*(.+?)\*\*|`([^`]+)`)/g;
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+    if (match[0].startsWith("**")) {
+      parts.push(<Text key={match.index} bold>{match[2]}</Text>);
+    } else {
+      parts.push(<Text key={match.index} color="green">{match[3]}</Text>);
+    }
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+
+  return parts.length === 1 && typeof parts[0] === "string" ? parts[0] : parts;
 }
 
 // ─── renderMarkdown ───────────────────────────────────────────────────────────

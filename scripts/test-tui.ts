@@ -73,7 +73,7 @@ function spawnTui(): TuiHandle {
     if (process.env[k]) env[k] = process.env[k]!;
   }
 
-  const proc = spawn("bun", ["run", "scripts/tui-client.ts"], {
+  const proc = spawn("bun", ["run", "scripts/tui-client.tsx"], {
     stdio: ["pipe", "pipe", "pipe"],
     env,
     cwd: process.cwd(),

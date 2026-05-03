@@ -28,4 +28,6 @@ export interface IRenderer {
   clearMessages(): void;
   /** Resets scroll offset to 0 (bottom of conversation). */
   resetScroll(): void;
+  /** M4: actualiza el label del spinner dinámicamente. Opcional para no romper mocks. */
+  updateSpinnerLabel?(label: string): void;
 }

@@ -253,25 +253,53 @@ describe("InkInput", () => {
   // ── scrollOffset via setAppState ─────────────────────────────────────────────
 
   it("scrollUpArrow incrementa scrollOffset cuando no hay pendingPermission", () => {
-    input.start();
-    simulateArrowUp();
-    expect(getState().scrollOffset).toBe(1);
+    // Con mensajes en el estado, el offset puede subir
+    let stateWithMsgs = {
+      ...initialTuiAppState,
+      messages: Array.from({ length: 30 }, (_, i) => ({ kind: "user" as const, text: `msg ${i}` })),
+    };
+    const setAppState = (updater: TuiAppState | ((s: TuiAppState) => TuiAppState)) => {
+      if (typeof updater === "function") stateWithMsgs = updater(stateWithMsgs);
+      else stateWithMsgs = updater;
+    };
+    const inputWithMsgs = new InkInput(setAppState);
+    inputWithMsgs.start();
+    inputWithMsgs.handleArrowUp();
+    expect(stateWithMsgs.scrollOffset).toBe(1);
   });
 
   it("scrollUpArrow incrementa scrollOffset acumulativamente", () => {
-    input.start();
-    simulateArrowUp();
-    simulateArrowUp();
-    simulateArrowUp();
-    expect(getState().scrollOffset).toBe(3);
+    let stateWithMsgs = {
+      ...initialTuiAppState,
+      messages: Array.from({ length: 30 }, (_, i) => ({ kind: "user" as const, text: `msg ${i}` })),
+    };
+    const setAppState = (updater: TuiAppState | ((s: TuiAppState) => TuiAppState)) => {
+      if (typeof updater === "function") stateWithMsgs = updater(stateWithMsgs);
+      else stateWithMsgs = updater;
+    };
+    const inputWithMsgs = new InkInput(setAppState);
+    inputWithMsgs.start();
+    inputWithMsgs.handleArrowUp();
+    inputWithMsgs.handleArrowUp();
+    inputWithMsgs.handleArrowUp();
+    expect(stateWithMsgs.scrollOffset).toBe(3);
   });
 
   it("scrollDownArrow decrementa scrollOffset (mínimo 0)", () => {
-    input.start();
-    simulateArrowUp();
-    simulateArrowUp();
-    simulateArrowDown();
-    expect(getState().scrollOffset).toBe(1);
+    let stateWithMsgs = {
+      ...initialTuiAppState,
+      messages: Array.from({ length: 30 }, (_, i) => ({ kind: "user" as const, text: `msg ${i}` })),
+    };
+    const setAppState = (updater: TuiAppState | ((s: TuiAppState) => TuiAppState)) => {
+      if (typeof updater === "function") stateWithMsgs = updater(stateWithMsgs);
+      else stateWithMsgs = updater;
+    };
+    const inputWithMsgs = new InkInput(setAppState);
+    inputWithMsgs.start();
+    inputWithMsgs.handleArrowUp();
+    inputWithMsgs.handleArrowUp();
+    inputWithMsgs.handleArrowDown();
+    expect(stateWithMsgs.scrollOffset).toBe(1);
   });
 
   it("scrollDownArrow no baja de 0", () => {
@@ -289,12 +317,94 @@ describe("InkInput", () => {
     };
     input.start();
     // Activar pendingPermission directamente en el estado
-    simulateArrowUp(); // primero sin permiso → debe funcionar
-    expect(getState().scrollOffset).toBe(1);
+    simulateArrowUp(); // primero sin permiso → debe funcionar (0 mensajes → maxOffset=0 → sigue en 0)
+    expect(getState().scrollOffset).toBe(0);
 
     // Ahora simular que hay un permiso pendiente
     simulatePermissionActive(req);
     simulateArrowUp(); // con permiso → NO debe cambiar
-    expect(getState().scrollOffset).toBe(1);
+    expect(getState().scrollOffset).toBe(0);
+  });
+
+  // ── C-5: clamp scrollOffset ──────────────────────────────────────────────────
+
+  it("C5: handleArrowUp no supera el máximo offset posible (sin mensajes)", () => {
+    input.start();
+    // Con 0 mensajes, maxOffset = 0 → scrollOffset nunca sube
+    simulateArrowUp();
+    simulateArrowUp();
+    simulateArrowUp();
+    expect(getState().scrollOffset).toBe(0);
+  });
+
+  it("C5: handleArrowUp con 20 mensajes clampea al máximo", () => {
+    // Crear un input con estado inicial que tiene 20 mensajes
+    const messages = Array.from({ length: 20 }, (_, i) => ({
+      kind: "user" as const,
+      text: `msg ${i}`,
+    }));
+    let state3 = { ...initialTuiAppState, messages };
+    const setAppState3 = (updater: TuiAppState | ((s: TuiAppState) => TuiAppState)) => {
+      if (typeof updater === "function") {
+        state3 = updater(state3);
+      } else {
+        state3 = updater;
+      }
+    };
+    const input3 = new InkInput(setAppState3);
+    input3.start();
+    // Simular muchos arrow ups
+    for (let i = 0; i < 50; i++) {
+      input3.handleArrowUp();
+    }
+    // rows = process.stdout.rows ?? 24, visibleCount = max(1, rows-6)
+    // maxOffset = max(0, 20 - visibleCount)
+    const rows = process.stdout.rows ?? 24;
+    const visibleCount = Math.max(1, rows - 6);
+    const maxOffset = Math.max(0, 20 - visibleCount);
+    expect(state3.scrollOffset).toBe(maxOffset);
+  });
+
+  // ── C-8/M6: askPermission acepta si/sí/s ────────────────────────────────────
+
+  it("C8/M6: askPermission aprueba con 'si'", async () => {
+    const req: PermissionRequest = { sessionId: "s1", toolName: "bash", description: "test", input: {} };
+    input.start();
+    const promise = input.askPermission(req);
+    getState().onPermissionResponse?.("si");
+    expect(await promise).toBe(true);
+  });
+
+  it("C8/M6: askPermission aprueba con 'sí'", async () => {
+    const req: PermissionRequest = { sessionId: "s1", toolName: "bash", description: "test", input: {} };
+    input.start();
+    const promise = input.askPermission(req);
+    getState().onPermissionResponse?.("sí");
+    expect(await promise).toBe(true);
+  });
+
+  it("C8/M6: askPermission aprueba con 's'", async () => {
+    const req: PermissionRequest = { sessionId: "s1", toolName: "bash", description: "test", input: {} };
+    input.start();
+    const promise = input.askPermission(req);
+    getState().onPermissionResponse?.("s");
+    expect(await promise).toBe(true);
+  });
+
+  it("C8/M6: askPermission deniega con 'n'", async () => {
+    const req: PermissionRequest = { sessionId: "s1", toolName: "bash", description: "test", input: {} };
+    input.start();
+    const promise = input.askPermission(req);
+    getState().onPermissionResponse?.("n");
+    expect(await promise).toBe(false);
+  });
+
+  it("C8/M6: askPermission deniega con 'no'", async () => {
+    const req: PermissionRequest = { sessionId: "s1", toolName: "bash", description: "test", input: {} };
+    input.start();
+    const promise = input.askPermission(req);
+    getState().onPermissionResponse?.("no");
+    expect(await promise).toBe(false);
   });
 });
+

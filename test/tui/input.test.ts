@@ -71,11 +71,11 @@ describe("parseInputLine", () => {
     expect(parseInputLine("/resume ABC12345")).toEqual({ type: "command", command: "resume:abc12345" });
   });
 
-  it("devuelve prompt para /resume sin ID (sin argumento)", () => {
-    expect(parseInputLine("/resume")).toEqual({ type: "prompt", text: "/resume" });
+  it("devuelve command resume-missing-id para /resume sin argumento (A-3)", () => {
+    expect(parseInputLine("/resume")).toEqual({ type: "command", command: "resume-missing-id" });
   });
 
-  it("devuelve prompt para /resume con solo espacios (sin ID real)", () => {
-    expect(parseInputLine("/resume   ")).toEqual({ type: "prompt", text: "/resume" });
+  it("devuelve command resume-missing-id para /resume con solo espacios (A-3)", () => {
+    expect(parseInputLine("/resume   ")).toEqual({ type: "command", command: "resume-missing-id" });
   });
 });

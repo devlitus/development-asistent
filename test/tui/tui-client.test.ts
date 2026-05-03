@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { createTuiOrchestrator } from "../../scripts/tui-client.tsx";
+import { createTuiOrchestrator, checkProviderConnectivity } from "../../scripts/tui-client.tsx";
 import type {
   IAcpClient,
   IAgentProcess,
@@ -290,49 +290,31 @@ describe("runHealthChecks", () => {
   });
 
   it("health check OK when provider responds", async () => {
-    const { renderer, calls } = makeRenderer();
-    const { input } = makeInput();
-
-    const acpClient: IAcpClient = {
-      ...makeAcpClient(),
-      sendPrompt: async () => {},
-    };
-
-    const deps = makeDeps({ renderer, input, acpClient, env: {} });
-
-    const orchestrator = createTuiOrchestrator(deps);
-    await orchestrator.start();
-
-    const systemMessages = calls
-      .filter((c) => c.method === "renderSystemMessage")
-      .map((c) => c.args[0] as string);
-
-    expect(systemMessages.some((m) => m.includes("✓ Provider OK"))).toBe(true);
+    // Tests checkProviderConnectivity directly (fire-and-forget probe, not acpClient)
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({ ok: true, status: 200 } as Response);
+    try {
+      const result = await checkProviderConnectivity({ LM_STUDIO_HOST: "http://localhost:1234" });
+      expect(result.ok).toBe(true);
+      expect(result.message).toBe("✓ Provider OK");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it("health check warns on provider timeout", async () => {
-    const { renderer, calls } = makeRenderer();
-    const { input } = makeInput();
-
-    const acpClient: IAcpClient = {
-      ...makeAcpClient(),
-      sendPrompt: async (_sessionId, text) => {
-        if (text === "__health_check__") {
-          throw new Error("timeout");
-        }
-      },
+    // Tests checkProviderConnectivity directly — simulates AbortError (timeout)
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      throw Object.assign(new Error("The operation was aborted."), { name: "AbortError" });
     };
-
-    const deps = makeDeps({ renderer, input, acpClient, env: {} });
-
-    const orchestrator = createTuiOrchestrator(deps);
-    await orchestrator.start();
-
-    const systemMessages = calls
-      .filter((c) => c.method === "renderSystemMessage")
-      .map((c) => c.args[0] as string);
-
-    expect(systemMessages.some((m) => m.includes("⚠ Provider no responde"))).toBe(true);
+    try {
+      const result = await checkProviderConnectivity({ LM_STUDIO_HOST: "http://localhost:1234" });
+      expect(result.ok).toBe(false);
+      expect(result.message).toContain("⚠ Provider no responde");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it("health check OK when TAVILY_API_KEY present (without BRAVE)", async () => {
@@ -352,28 +334,18 @@ describe("runHealthChecks", () => {
   });
 
   it("health check warns on provider generic error", async () => {
-    const { renderer, calls } = makeRenderer();
-    const { input } = makeInput();
-
-    const acpClient: IAcpClient = {
-      ...makeAcpClient(),
-      sendPrompt: async (_sessionId, text) => {
-        if (text === "__health_check__") {
-          throw new Error("connection refused");
-        }
-      },
+    // Tests checkProviderConnectivity directly — simulates network error
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      throw new Error("connection refused");
     };
-
-    const deps = makeDeps({ renderer, input, acpClient, env: {} });
-
-    const orchestrator = createTuiOrchestrator(deps);
-    await orchestrator.start();
-
-    const systemMessages = calls
-      .filter((c) => c.method === "renderSystemMessage")
-      .map((c) => c.args[0] as string);
-
-    expect(systemMessages.some((m) => m.includes("⚠ Provider error:"))).toBe(true);
+    try {
+      const result = await checkProviderConnectivity({ LM_STUDIO_HOST: "http://localhost:1234" });
+      expect(result.ok).toBe(false);
+      expect(result.message).toContain("⚠ Provider error:");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
 
@@ -664,5 +636,129 @@ describe("handlePrompt resetScroll", () => {
     const resetIdx = calls.findIndex((c) => c.method === "resetScroll");
     const userMsgIdx = calls.findIndex((c) => c.method === "renderUserMessage");
     expect(resetIdx).toBeLessThan(userMsgIdx);
+  });
+});
+
+// ─── C-4: Recovery tras crash ─────────────────────────────────────────────────
+
+describe("C4: recovery tras crash del agente", () => {
+  it("onExit NO llama doExit — pone estado error y muestra opciones", async () => {
+    const { renderer, calls } = makeRenderer();
+    const { input } = makeInput();
+
+    let exitCalled = false;
+    let capturedExitHandler: ((code: number | null) => void) | null = null;
+
+    const agentProcess: IAgentProcess = {
+      spawn: () => {},
+      kill: () => {},
+      onExit: (h) => { capturedExitHandler = h; },
+    };
+
+    const deps = makeDeps({
+      renderer,
+      input,
+      agentProcess,
+      exit: () => { exitCalled = true; },
+    });
+
+    const orchestrator = createTuiOrchestrator(deps);
+    await orchestrator.start();
+
+    calls.length = 0;
+
+    // Simular crash del agente
+    capturedExitHandler?.(1);
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(exitCalled).toBe(false);
+    expect(calls.some((c) => c.method === "renderError")).toBe(true);
+    const systemMessages = calls
+      .filter((c) => c.method === "renderSystemMessage")
+      .map((c) => c.args[0] as string);
+    expect(systemMessages.some((m) => m.includes("/new"))).toBe(true);
+    expect(systemMessages.some((m) => m.includes("/quit"))).toBe(true);
+  });
+
+  it("C4: new-session tras crash llama agentProcess.spawn()", async () => {
+    const { renderer, calls } = makeRenderer();
+    const { input, handlers } = makeInput();
+
+    let spawnCallCount = 0;
+    let capturedExitHandler: ((code: number | null) => void) | null = null;
+
+    const agentProcess: IAgentProcess = {
+      spawn: () => { spawnCallCount++; },
+      kill: () => {},
+      onExit: (h) => { capturedExitHandler = h; },
+    };
+
+    const deps = makeDeps({
+      renderer,
+      input,
+      agentProcess,
+      exit: () => {},
+    });
+
+    const orchestrator = createTuiOrchestrator(deps);
+    await orchestrator.start();
+
+    // Simular crash
+    capturedExitHandler?.(1);
+    await new Promise((r) => setTimeout(r, 10));
+
+    const spawnBeforeNew = spawnCallCount;
+    calls.length = 0;
+
+    // Ejecutar /new
+    for (const h of handlers.command) {
+      await h("new-session");
+    }
+    await new Promise((r) => setTimeout(r, 10));
+
+    // spawn() debe haberse llamado de nuevo
+    expect(spawnCallCount).toBeGreaterThan(spawnBeforeNew);
+  });
+});
+
+// ─── C-1: SIGINT ─────────────────────────────────────────────────────────────
+
+describe("C1: SIGINT llama shutdown", () => {
+  it("SIGINT emitido llama agentProcess.kill()", async () => {
+    // Limpiar handlers SIGINT previos para evitar interferencias
+    process.removeAllListeners("SIGINT");
+
+    const { renderer } = makeRenderer();
+    const { input } = makeInput();
+
+    let killCalled = false;
+    const agentProcess: IAgentProcess = {
+      spawn: () => {},
+      kill: () => { killCalled = true; },
+      onExit: () => {},
+    };
+
+    let exitCalled = false;
+    const deps = makeDeps({
+      renderer,
+      input,
+      agentProcess,
+      exit: () => { exitCalled = true; },
+    });
+
+    const orchestrator = createTuiOrchestrator(deps);
+    await orchestrator.start();
+
+    // Emitir SIGINT
+    process.emit("SIGINT");
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(killCalled).toBe(true);
+    expect(exitCalled).toBe(true);
+
+    // Limpiar el handler para no afectar otros tests
+    process.removeAllListeners("SIGINT");
   });
 });

@@ -7,7 +7,7 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import type { TuiAppState, DisplayMessage } from "../../scripts/tui/ink-renderer.tsx";
-import { InkRenderer } from "../../scripts/tui/ink-renderer.tsx";
+import { InkRenderer, initialTuiAppState } from "../../scripts/tui/ink-renderer.tsx";
 import type { PermissionRequest } from "../../scripts/tui/types.ts";
 
 // ─── Helper: crea un InkRenderer con setState capturado ──────────────────────
@@ -110,6 +110,39 @@ describe("InkRenderer", () => {
     expect(msgs).toHaveLength(0);
   });
 
+  // ── C-2: race condition fix ──────────────────────────────────────────────────
+
+  it("C2: renderAgentMessageEnd incluye chunks pendientes (no flusheados aún) en el mensaje final", () => {
+    renderer.renderAgentMessageStart();
+    // Llamar renderStreamChunk sin esperar el timer de 16ms
+    renderer.renderStreamChunk("hola ");
+    renderer.renderStreamChunk("mundo");
+    // Llamar renderAgentMessageEnd inmediatamente (antes del timer)
+    renderer.renderAgentMessageEnd();
+
+    const state = getState();
+    expect(state.streamBuffer).toBe("");
+    const agentMsg = state.messages.find((m) => m.kind === "agent") as Extract<DisplayMessage, { kind: "agent" }> | undefined;
+    expect(agentMsg).toBeDefined();
+    expect(agentMsg?.text).toBe("hola mundo");
+  });
+
+  it("C2: renderAgentMessageEnd con chunks ya flusheados y chunks pendientes combina ambos", async () => {
+    renderer.renderAgentMessageStart();
+    renderer.renderStreamChunk("primer ");
+    // Esperar flush del timer
+    await new Promise((r) => setTimeout(r, 30));
+    // Ahora el streamBuffer tiene "primer "
+    renderer.renderStreamChunk("segundo");
+    // Llamar end inmediatamente (antes del segundo timer)
+    renderer.renderAgentMessageEnd();
+
+    const state = getState();
+    expect(state.streamBuffer).toBe("");
+    const agentMsg = state.messages.find((m) => m.kind === "agent") as Extract<DisplayMessage, { kind: "agent" }> | undefined;
+    expect(agentMsg?.text).toBe("primer segundo");
+  });
+
   // ── renderSystemMessage ─────────────────────────────────────────────────────
 
   it("renderSystemMessage añade mensaje {kind: 'system'}", () => {
@@ -190,8 +223,6 @@ describe("InkRenderer", () => {
     expect(msgs[0]).toEqual({ kind: "tool_result", name: "bash", status: "completed" });
   });
 
-  // ── Acumulación de múltiples mensajes ───────────────────────────────────────
-
   // ── clearMessages ───────────────────────────────────────────────────────────
 
   it("clearMessages vacía messages y streamBuffer", () => {
@@ -240,5 +271,13 @@ describe("InkRenderer", () => {
 
     r2.resetScroll();
     expect(state.scrollOffset).toBe(0);
+  });
+});
+
+// ─── C-6: initialTuiAppState ──────────────────────────────────────────────────
+
+describe("initialTuiAppState", () => {
+  it("C6/M1: version inicial es '...' (no vacío)", () => {
+    expect(initialTuiAppState.version).toBe("...");
   });
 });
