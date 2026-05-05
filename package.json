@@ -44,7 +44,7 @@
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "0.91.1",
-    "@types/bun": "1.2.0",
+    "@types/bun": "1.3.13",
     "@types/react": "18.3.23",
     "@zed-industries/agent-client-protocol": "0.4.5",
     "openai": "6.34.0",
