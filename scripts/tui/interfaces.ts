@@ -12,7 +12,7 @@ export interface IRenderer {
   renderHeader(version: string): void;
   renderStatusBar(status: TuiStatus): void;
   renderUserMessage(text: string): void;
-  renderAgentMessageStart(): void;
+  renderAgentMessageStart(agentName?: string): void;
   renderStreamChunk(chunk: string): void;
   renderAgentMessageEnd(): void;
   renderSystemMessage(text: string): void;

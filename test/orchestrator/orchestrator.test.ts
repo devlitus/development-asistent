@@ -838,3 +838,79 @@ describe("dispatch routing marker", () => {
     expect(routingIdx).toBeLessThan(delegatingIdx);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// D-01: STATUS_MARKER en yields de progreso
+// ═══════════════════════════════════════════════════════════════════
+
+describe("dispatch STATUS_MARKER (D-01)", () => {
+  it("primer yield de texto incluye STATUS_MARKER + 'Analizando tu solicitud'", async () => {
+    const orchestrator = createTestOrchestrator({
+      classifier: createMockClassifier("code"),
+    });
+    const agent = createMockAgent("code", { success: true, output: "done" });
+    orchestrator.registerAgent(agent);
+
+    const events = await collectEvents(
+      orchestrator.dispatch(makeSessionId("s-status-1"), "hola"),
+    );
+
+    const textEvents = events.filter((e) => e.type === "text") as Array<{ type: "text"; content: string }>;
+    const statusEvent = textEvents.find((e) => e.content.startsWith("\x00STATUS\x00") && e.content.includes("Analizando"));
+
+    expect(statusEvent).toBeDefined();
+    expect(statusEvent!.content).toBe("\x00STATUS\x00Analizando tu solicitud...");
+  });
+
+  it("yield de delegación incluye STATUS_MARKER + 'Delegando al agente'", async () => {
+    const orchestrator = createTestOrchestrator({
+      classifier: createMockClassifier("code"),
+    });
+    const agent = createMockAgent("code", { success: true, output: "done" });
+    orchestrator.registerAgent(agent);
+
+    const events = await collectEvents(
+      orchestrator.dispatch(makeSessionId("s-status-2"), "hola"),
+    );
+
+    const textEvents = events.filter((e) => e.type === "text") as Array<{ type: "text"; content: string }>;
+    const delegatingEvent = textEvents.find((e) => e.content.startsWith("\x00STATUS\x00") && e.content.includes("Delegando"));
+
+    expect(delegatingEvent).toBeDefined();
+    expect(delegatingEvent!.content).toContain("\x00STATUS\x00Delegando al agente de");
+  });
+
+  it("STATUS_MARKER es el prefijo correcto (\\x00STATUS\\x00)", async () => {
+    const { STATUS_MARKER } = await import("../../src/orchestrator/orchestrator.ts");
+    expect(STATUS_MARKER).toBe("\x00STATUS\x00");
+  });
+
+  it("ERR_MARKER es el prefijo correcto (\\x00ERR\\x00)", async () => {
+    const { ERR_MARKER } = await import("../../src/orchestrator/orchestrator.ts");
+    expect(ERR_MARKER).toBe("\x00ERR\x00");
+  });
+
+  it("output del LLM con marcadores NUL es filtrado antes de emitir", async () => {
+    // Si el LLM genera \x00STATUS\x00 o \x00ERR\x00 en su output, deben eliminarse
+    const orchestrator = createTestOrchestrator({
+      classifier: createMockClassifier("code"),
+    });
+    const agent = createMockAgent("code", {
+      success: true,
+      output: "respuesta normal\x00STATUS\x00inyectado\x00ERR\x00también",
+    });
+    orchestrator.registerAgent(agent);
+
+    const events = await collectEvents(
+      orchestrator.dispatch(makeSessionId("s-nul-filter"), "hola"),
+    );
+
+    const textEvents = events.filter((e) => e.type === "text") as Array<{ type: "text"; content: string }>;
+    const outputEvent = textEvents.find((e) => e.content.includes("respuesta normal"));
+
+    expect(outputEvent).toBeDefined();
+    expect(outputEvent!.content).not.toContain("\x00STATUS\x00");
+    expect(outputEvent!.content).not.toContain("\x00ERR\x00");
+    expect(outputEvent!.content).toBe("respuesta normalinyectadotambién");
+  });
+});

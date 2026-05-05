@@ -75,6 +75,11 @@ interface SessionEntry {
   lastAccessedAt: number;
 }
 
+// ─── Marker constants ──────────────────────────────────────────────
+
+export const STATUS_MARKER = "\x00STATUS\x00" as const;
+export const ERR_MARKER    = "\x00ERR\x00" as const;
+
 // ─── Orchestrator ──────────────────────────────────────────────────
 
 export class Orchestrator {
@@ -284,7 +289,7 @@ export class Orchestrator {
     }
 
     // ─── Step 1: Emit initial status ──────────────────────────
-    yield { type: "text", content: "Analizando tu solicitud..." };
+    yield { type: "text", content: `${STATUS_MARKER}Analizando tu solicitud...` };
 
     // ─── Step 2: Get active messages from ContextWindow ───────
     // If no ContextWindow exists for this session, lazily create one and
@@ -378,7 +383,7 @@ export class Orchestrator {
     // ─── Step 5: Emit delegating status ───────────────────────
     yield {
       type: "text",
-      content: `Delegando al agente de ${agent.name}...`,
+      content: `${STATUS_MARKER}Delegando al agente de ${agent.name}...`,
     };
 
     // ─── Step 6: Build extended context ───────────────────────
@@ -413,7 +418,8 @@ export class Orchestrator {
         // Add assistant response to context window
         contextWindow.addMessages([{ role: "assistant", content: result.output }]);
 
-        yield { type: "text", content: result.output };
+        const safeOutput = result.output.replace(/\x00[A-Z_]+\x00/g, "");
+        yield { type: "text", content: safeOutput };
         yield { type: "done", success: true };
       } else {
         yield {

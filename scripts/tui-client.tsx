@@ -103,6 +103,8 @@ export interface TuiOrchestratorDeps {
 const ROUTING_MARKER     = "\x00ROUTING\x00";
 const TOOL_CALL_MARKER   = "\x00TOOL_CALL\x00";
 const TOOL_RESULT_MARKER = "\x00TOOL_RESULT\x00";
+const STATUS_MARKER      = "\x00STATUS\x00";
+const ERR_MARKER         = "\x00ERR\x00";
 
 // ─── TuiOrchestrator ─────────────────────────────────────────────────────────
 
@@ -126,6 +128,9 @@ export function createTuiOrchestrator(deps: TuiOrchestratorDeps): TuiOrchestrato
 
   // Tracks whether we've started rendering the current agent message
   let agentMessageStarted = false;
+
+  // Tracks the last routed agent name for message prefix
+  let lastRoutedAgent = "Agent";
 
   // A5: stored sigint handler reference so shutdown() can remove it
   let sigintHandler: (() => void) | null = null;
@@ -160,6 +165,7 @@ export function createTuiOrchestrator(deps: TuiOrchestratorDeps): TuiOrchestrato
 
     // Reset streaming flag for this new prompt
     agentMessageStarted = false;
+    lastRoutedAgent = "Agent";
 
     renderer.renderStatusBar("thinking");
     renderer.startSpinner();
@@ -383,13 +389,26 @@ export function createTuiOrchestrator(deps: TuiOrchestratorDeps): TuiOrchestrato
       // 3. Routing marker
       if (text.startsWith(ROUTING_MARKER)) {
         const agentName = text.slice(ROUTING_MARKER.length);
+        lastRoutedAgent = agentName;
         renderer.renderRoutingInfo(agentName);
         return;
       }
 
-      // 4. Normal text
+      // 4. Status marker
+      if (text.startsWith(STATUS_MARKER)) {
+        renderer.renderSystemMessage(text.slice(STATUS_MARKER.length));
+        return;
+      }
+
+      // 5. Error marker
+      if (text.startsWith(ERR_MARKER)) {
+        renderer.renderError(text.slice(ERR_MARKER.length));
+        return;
+      }
+
+      // 6. Normal text
       if (!agentMessageStarted) {
-        renderer.renderAgentMessageStart();
+        renderer.renderAgentMessageStart(lastRoutedAgent);
         agentMessageStarted = true;
       }
       renderer.renderStreamChunk(text);
@@ -468,26 +487,12 @@ export function createTuiOrchestrator(deps: TuiOrchestratorDeps): TuiOrchestrato
       );
     }
 
-    // ── Check 2: LLM provider ping ──────────────────────────────────────────────
-    try {
-      const pingPromise = acpClient.sendPrompt(sessionId, "__health_check__");
-      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        timeoutHandle = setTimeout(() => reject(new Error("timeout")), 10_000);
-      });
-      try {
-        await Promise.race([pingPromise, timeoutPromise]);
-      } finally {
-        clearTimeout(timeoutHandle);
-      }
-      renderer.renderSystemMessage(`✓ Provider OK`);
-    } catch (err) {
-      const isTimeout = String(err).includes("timeout");
-      renderer.renderSystemMessage(
-        isTimeout
-          ? "⚠ Provider no responde (timeout 10s)"
-          : `⚠ Provider error: ${String(err)}`
-      );
+    // ── Check 2: LLM provider env vars (D-02: no sendPrompt, solo env vars) ────
+    const llmProviderName = detectLlmProviderFromEnv(env);
+    if (llmProviderName) {
+      renderer.renderSystemMessage(`✓ LLM provider configurado: ${llmProviderName}`);
+    } else {
+      renderer.renderSystemMessage("⚠ Sin provider LLM configurado");
     }
   }
 
@@ -526,6 +531,88 @@ export function createTuiOrchestrator(deps: TuiOrchestratorDeps): TuiOrchestrato
 }
 
 // ─── main() ──────────────────────────────────────────────────────────────────
+
+/**
+ * Detects the LLM provider name from environment variables (D-02).
+ * Returns the provider name or null if none configured.
+ * Uses injected env for testability.
+ */
+function detectLlmProviderFromEnv(env: Record<string, string | undefined>): string | null {
+  if (env["ANTHROPIC_API_KEY"]) return "Anthropic";
+  if (env["OPENAI_API_KEY"]) return "OpenAI";
+  if (env["LM_STUDIO_HOST"]) return "LM Studio";
+  if (env["LLAMACPP_HOST"]) return "llama.cpp";
+  if (env["OLLAMA_HOST"]) return "Ollama";
+  return null;
+}
+
+/**
+ * Detects the LLM provider URL from environment variables.
+ * Returns the URL to probe, or null if no URL-based provider is configured.
+ */
+function detectLlmProviderUrl(env: Record<string, string | undefined>): string | null {
+  const checks = [
+    ["LM_STUDIO_HOST", "/v1/models"],
+    ["LLAMACPP_HOST",  "/v1/models"],
+    ["OLLAMA_HOST",    "/api/tags"],
+  ] as const;
+  for (const [key, path] of checks) {
+    const raw = env[key];
+    if (!raw) continue;
+    try {
+      const parsed = new URL(raw);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") continue;
+      return `${parsed.origin}${path}`;
+    } catch {
+      continue; // URL malformada — ignorar
+    }
+  }
+  return null;
+}
+
+/**
+ * Checks LLM provider connectivity.
+ * - For URL-based providers (Ollama, LM Studio, llama.cpp): does a fetch probe.
+ * - For API-key providers (Anthropic, OpenAI): just checks env var presence.
+ * Exported for testing.
+ */
+export async function checkProviderConnectivity(
+  env: Record<string, string | undefined>
+): Promise<{ ok: boolean; message: string }> {
+  const probeUrl = detectLlmProviderUrl(env);
+
+  if (probeUrl) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5_000);
+      try {
+        const res = await fetch(probeUrl, { signal: controller.signal });
+        if (res.ok) {
+          return { ok: true, message: "✓ Provider OK" };
+        }
+        return { ok: false, message: `⚠ Provider error: HTTP ${res.status}` };
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    } catch (err) {
+      const isAbort = err instanceof Error && err.name === "AbortError";
+      if (isAbort) {
+        return { ok: false, message: "⚠ Provider no responde (timeout 5s)" };
+      }
+      return { ok: false, message: `⚠ Provider error: ${String(err)}` };
+    }
+  }
+
+  // API-key based providers — just check env var presence
+  if (env["ANTHROPIC_API_KEY"]) {
+    return { ok: true, message: "✓ Provider OK (Anthropic API key configurada)" };
+  }
+  if (env["OPENAI_API_KEY"]) {
+    return { ok: true, message: "✓ Provider OK (OpenAI API key configurada)" };
+  }
+
+  return { ok: false, message: "⚠ Sin provider LLM configurado (revisar ANTHROPIC_API_KEY / OPENAI_API_KEY / OLLAMA_HOST)" };
+}
 
 /**
  * Entry point: creates real dependencies using Ink and starts the TUI.

@@ -23,8 +23,19 @@ interface JSONRPCMessage {
   error?: { code: number; message: string };
 }
 
-function buildRequest(id: number | string, method: string, params?: unknown): string {
-  return JSON.stringify({ jsonrpc: "2.0", id, method, ...(params !== undefined && { params }) }) + "\n";
+function buildRequest(
+  id: number | string,
+  method: string,
+  params?: unknown,
+): string {
+  return (
+    JSON.stringify({
+      jsonrpc: "2.0",
+      id,
+      method,
+      ...(params !== undefined && { params }),
+    }) + "\n"
+  );
 }
 
 function printManualMode(): void {
@@ -41,7 +52,9 @@ function printManualMode(): void {
     console.error(msg.trim());
   }
 
-  console.error("\nThen send session/prompt with the sessionId returned above:");
+  console.error(
+    "\nThen send session/prompt with the sessionId returned above:",
+  );
   console.error(
     JSON.stringify({
       jsonrpc: "2.0",
@@ -58,9 +71,22 @@ function printManualMode(): void {
 async function runAutoMode(): Promise<void> {
   console.error("=== ACP Spike Client (auto mode) ===\n");
 
-  // Verify API keys are available
-  if (!process.env.ANTHROPIC_API_KEY && !process.env.OPENAI_API_KEY) {
-    console.error("Error: No API key found. Set ANTHROPIC_API_KEY or OPENAI_API_KEY.");
+  // Verify at least one LLM provider is configured
+  const hasProvider =
+    process.env.ANTHROPIC_API_KEY ||
+    process.env.OPENAI_API_KEY ||
+    process.env.LM_STUDIO_HOST ||
+    process.env.LLAMACPP_HOST ||
+    process.env.OLLAMA_HOST;
+  if (!hasProvider) {
+    console.error(
+      "Error: No LLM provider configured. Set one of:\n" +
+        "  ANTHROPIC_API_KEY  — Anthropic Claude\n" +
+        "  OPENAI_API_KEY     — OpenAI GPT\n" +
+        "  LM_STUDIO_HOST     — LM Studio (e.g. http://localhost:1234)\n" +
+        "  LLAMACPP_HOST      — llama.cpp (e.g. http://localhost:8080)\n" +
+        "  OLLAMA_HOST        — Ollama (e.g. http://localhost:11434)",
+    );
     process.exit(1);
   }
 
@@ -87,7 +113,12 @@ async function runAutoMode(): Promise<void> {
         messages.push(msg);
         console.error(`[spike-client] Received: ${line.trim()}`);
 
-        if (msg.id === 2 && msg.result && typeof msg.result === "object" && "sessionId" in msg.result) {
+        if (
+          msg.id === 2 &&
+          msg.result &&
+          typeof msg.result === "object" &&
+          "sessionId" in msg.result
+        ) {
           sessionId = (msg.result as { sessionId: string }).sessionId;
           console.error(`[spike-client] Got sessionId: ${sessionId}`);
 
@@ -124,7 +155,10 @@ async function runAutoMode(): Promise<void> {
   child.stdin!.write(initMsg);
 
   // Send session/new
-  const newSessionMsg = buildRequest(2, "session/new", { cwd: "/tmp/spike", mcpServers: [] });
+  const newSessionMsg = buildRequest(2, "session/new", {
+    cwd: "/tmp/spike",
+    mcpServers: [],
+  });
   console.error(`[spike-client] Sending: ${newSessionMsg.trim()}`);
   child.stdin!.write(newSessionMsg);
 
@@ -158,8 +192,10 @@ async function runAutoMode(): Promise<void> {
   }
 
   const updateNotification = messages.find(
-    (m) => m.method === "session/update" &&
-      m.params && typeof m.params === "object" &&
+    (m) =>
+      m.method === "session/update" &&
+      m.params &&
+      typeof m.params === "object" &&
       (m.params as Record<string, unknown>).update &&
       typeof (m.params as Record<string, unknown>).update === "object" &&
       (m.params as Record<string, unknown>).update,
@@ -174,7 +210,8 @@ async function runAutoMode(): Promise<void> {
   const promptResponse = messages.find((m) => m.id === 3 && m.result);
   if (promptResponse) {
     console.error("✅ session/prompt response received");
-    const stopReason = (promptResponse.result as { stopReason?: string })?.stopReason;
+    const stopReason = (promptResponse.result as { stopReason?: string })
+      ?.stopReason;
     if (stopReason === "end_turn") {
       console.error("✅ stopReason is 'end_turn'");
     } else {

@@ -94,6 +94,32 @@ describe("session-prompt tool_call markers (DX-02)", () => {
     expect(chunks.some((t) => t.startsWith("\x00TOOL_RESULT\x00") && t.includes("read_file") && t.endsWith("\x00completed"))).toBe(true);
   });
 
+  it("error event emits chunk with \\x00ERR\\x00 prefix (D-01)", async () => {
+    const { store, sessionId } = makeSessionStore();
+    const { transport, notifications } = makeTransport();
+
+    const orchestrator = makeOrchestrator([
+      { type: "error", error: "agent_error", message: "Something went wrong" },
+      { type: "done", success: false },
+    ]);
+
+    await handleSessionPrompt(
+      { sessionId, prompt: [{ type: "text", text: "test" } as never] },
+      store,
+      transport,
+      1,
+      undefined,
+      orchestrator,
+    );
+
+    const chunks = notifications
+      .filter((n) => n.method === "session/update")
+      .map((n) => (n.params as { update: { content: { text: string } } }).update.content.text);
+
+    expect(chunks.some((t) => t.startsWith("\x00ERR\x00"))).toBe(true);
+    expect(chunks.some((t) => t.startsWith("\x00ERR\x00") && t.includes("Something went wrong"))).toBe(true);
+  });
+
   it("failed emits chunk with \\x00TOOL_RESULT\\x00...\\x00failed", async () => {
     const { store, sessionId } = makeSessionStore();
     const { transport, notifications } = makeTransport();

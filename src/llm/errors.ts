@@ -42,7 +42,7 @@ export function normalizeLLMError(error: unknown, host?: string, provider?: stri
       }
       return new Error(`LLM API error (${status}): please check your request`);
     }
-    return new Error("LLM request failed: please check your configuration");
+    return new Error(`LLM request failed: ${error.message}`);
   }
 
   return new Error(`LLM request failed: ${String(error)}`);

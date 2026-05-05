@@ -1,0 +1,121 @@
+{
+  "name": "personal-asistent-vscode",
+  "displayName": "Personal Asistent",
+  "description": "Agente de programación con 4 sub-agentes especializados (código, OS, docs, git)",
+  "version": "0.1.0",
+  "publisher": "personal-asistent",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "AI",
+    "Chat",
+    "Programming Languages"
+  ],
+  "keywords": [
+    "ai",
+    "agent",
+    "chat",
+    "copilot",
+    "code",
+    "git"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "chatParticipants": [
+      {
+        "id": "personal-asistent.agent",
+        "name": "asistent",
+        "fullName": "Personal Asistent",
+        "description": "Agente con sub-agentes de código, OS, documentación y git",
+        "isSticky": true,
+        "commands": [
+          {
+            "name": "code",
+            "description": "Leer/escribir archivos, buscar código, generar tests"
+          },
+          {
+            "name": "os",
+            "description": "Ejecutar comandos de shell con permisos explícitos"
+          },
+          {
+            "name": "docs",
+            "description": "Buscar documentación técnica en la web"
+          },
+          {
+            "name": "git",
+            "description": "Gestionar commits, ramas y pull requests"
+          }
+        ]
+      }
+    ],
+    "configuration": {
+      "title": "Personal Asistent",
+      "properties": {
+        "personalAsistent.bunExecutable": {
+          "type": "string",
+          "default": "bun",
+          "description": "Ruta al ejecutable de Bun (por defecto busca en PATH)"
+        },
+        "personalAsistent.serverPath": {
+          "type": "string",
+          "default": "",
+          "description": "Ruta al directorio del servidor personal-asistent. Vacío = detecta automáticamente desde el workspace."
+        },
+        "personalAsistent.anthropicApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Anthropic API Key (Claude). Se recomienda usar la variable de entorno ANTHROPIC_API_KEY."
+        },
+        "personalAsistent.openaiApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "OpenAI API Key. Se recomienda usar la variable de entorno OPENAI_API_KEY."
+        },
+        "personalAsistent.ollamaHost": {
+          "type": "string",
+          "default": "",
+          "description": "URL del servidor Ollama local (ej: http://localhost:11434)"
+        },
+        "personalAsistent.lmStudioHost": {
+          "type": "string",
+          "default": "",
+          "description": "URL del servidor LM Studio local (ej: http://localhost:1234)"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "personalAsistent.showLog",
+        "title": "Personal Asistent: Ver log del servidor",
+        "category": "Personal Asistent"
+      },
+      {
+        "command": "personalAsistent.diagnose",
+        "title": "Personal Asistent: Diagnóstico",
+        "category": "Personal Asistent"
+      },
+      {
+        "command": "personalAsistent.restart",
+        "title": "Personal Asistent: Reiniciar sesión",
+        "category": "Personal Asistent"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --sourcemap",
+    "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --sourcemap --watch",
+    "package": "vsce package",
+    "vscode:prepublish": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.95.0",
+    "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.25.0"
+  }
+}

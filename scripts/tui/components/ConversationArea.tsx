@@ -157,6 +157,7 @@ interface ConversationAreaProps {
   streamBuffer: string;
   maxRows?: number;
   scrollOffset: number;
+  currentAgentName?: string;
 }
 
 // ─── PermissionBlock ──────────────────────────────────────────────────────────
@@ -193,18 +194,28 @@ const MessageLine = React.memo(function MessageLine({ msg }: { msg: DisplayMessa
     case "agent":
       return (
         <Box>
-          <Text color="green">Agent › </Text>
+          <Text color="green">{msg.agentName ?? "Agent"} › </Text>
           {renderMarkdown(msg.text)}
         </Box>
       );
     case "system":
       return (
-        <Text color="gray" italic>
-          {msg.text}
-        </Text>
+        <Box flexDirection="column">
+          {msg.text.split("\n").map((line, i) => (
+            <Text key={i} color="gray" italic>{line}</Text>
+          ))}
+        </Box>
       );
     case "error":
-      return <Text color="red">✖ Error: {msg.text}</Text>;
+      return (
+        <Box flexDirection="column">
+          {msg.text.split("\n").map((line, i) => (
+            <Text key={i} color="red">
+              {i === 0 ? `✖ Error: ${line}` : `  ${line}`}
+            </Text>
+          ))}
+        </Box>
+      );
     case "routing":
       return (
         <Text color="gray" dimColor>
@@ -238,6 +249,7 @@ export function ConversationArea({
   streamBuffer,
   maxRows,
   scrollOffset,
+  currentAgentName,
 }: ConversationAreaProps): React.ReactElement {
   const rows = maxRows ?? Math.max(1, (process.stdout.rows ?? 24) - 6);
 
@@ -263,7 +275,7 @@ export function ConversationArea({
       ))}
       {streamBuffer ? (
         <Box>
-          <Text color="green">Agent › </Text>
+          <Text color="green">{currentAgentName ?? "Agent"} › </Text>
           {renderMarkdown(streamBuffer)}
         </Box>
       ) : null}

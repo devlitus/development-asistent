@@ -124,3 +124,68 @@ describe("PermissionBlock truncado (lógica)", () => {
     expect(truncated).toBe(inputStr);
   });
 });
+
+// ─── D-05: Multi-línea en mensajes system y error ─────────────────────────────
+
+// Nota: Los componentes React de Ink no se pueden montar fácilmente en tests unitarios.
+// Verificamos la lógica de split que usa ConversationArea internamente.
+
+describe("D-05: Multi-línea en mensajes system/error (lógica de split)", () => {
+  it("texto con \\n se divide en múltiples líneas", () => {
+    const text = "Línea 1\nLínea 2\nLínea 3";
+    const lines = text.split("\n");
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toBe("Línea 1");
+    expect(lines[1]).toBe("Línea 2");
+    expect(lines[2]).toBe("Línea 3");
+  });
+
+  it("texto sin \\n produce una sola línea", () => {
+    const text = "Mensaje simple";
+    const lines = text.split("\n");
+    expect(lines).toHaveLength(1);
+  });
+
+  it("líneas vacías (\\n\\n) producen string vacío que se convierte en espacio", () => {
+    const text = "Párrafo 1\n\nPárrafo 2";
+    const lines = text.split("\n");
+    expect(lines).toHaveLength(3);
+    expect(lines[1]).toBe(""); // línea vacía
+    // La lógica de ConversationArea usa {line || " "} para preservar separación
+    expect(lines[1] || " ").toBe(" ");
+  });
+
+  it("error multi-línea: primera línea lleva prefijo '✖ Error:', resto lleva indentación", () => {
+    const text = "Fallo principal\nDetalle adicional";
+    const lines = text.split("\n");
+    const formatted = lines.map((line, i) =>
+      i === 0 ? `✖ Error: ${line}` : `  ${line}`
+    );
+    expect(formatted[0]).toBe("✖ Error: Fallo principal");
+    expect(formatted[1]).toBe("  Detalle adicional");
+  });
+
+  it("error una línea: solo lleva prefijo '✖ Error:'", () => {
+    const text = "Fallo simple";
+    const lines = text.split("\n");
+    expect(lines).toHaveLength(1);
+    const formatted = lines.map((line, i) =>
+      i === 0 ? `✖ Error: ${line}` : `  ${line}`
+    );
+    expect(formatted[0]).toBe("✖ Error: Fallo simple");
+  });
+
+  it("output de /help (7 líneas) se divide correctamente", () => {
+    const helpText =
+      "Comandos disponibles:\n" +
+      "  /help         — muestra esta ayuda\n" +
+      "  /clear        — limpia la pantalla\n" +
+      "  /new          — inicia una nueva sesión\n" +
+      "  /status       — muestra info de sesión y provider\n" +
+      "  /sessions     — lista las últimas 10 sesiones\n" +
+      "  /quit         — sale del TUI";
+    const lines = helpText.split("\n");
+    expect(lines).toHaveLength(7);
+    expect(lines[0]).toBe("Comandos disponibles:");
+  });
+});

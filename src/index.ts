@@ -22,24 +22,12 @@ export async function startup(): Promise<void> {
   }
   console.error(`personal-asistent v${pkg.version} starting...`);
 
-  // Detectar provider disponible (env vars)
+  // Detectar provider disponible (env vars, con LM Studio como fallback)
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
   const openaiKey = process.env.OPENAI_API_KEY;
-  const lmStudioHost = process.env.LM_STUDIO_HOST;
+  const lmStudioHost = process.env.LM_STUDIO_HOST || "http://localhost:1234";
   const llamaCppHost = process.env.LLAMACPP_HOST;
   const ollamaHost = process.env.OLLAMA_HOST;
-
-  if (!anthropicKey && !openaiKey && !lmStudioHost && !llamaCppHost && !ollamaHost) {
-    console.error(
-      "Error: No LLM provider configured. Set one of:\n" +
-      "  ANTHROPIC_API_KEY  — Anthropic Claude (cloud)\n" +
-      "  OPENAI_API_KEY     — OpenAI GPT (cloud)\n" +
-      "  LM_STUDIO_HOST     — LM Studio local (e.g. http://localhost:1234)\n" +
-      "  LLAMACPP_HOST      — llama.cpp server (e.g. http://localhost:8080)\n" +
-      "  OLLAMA_HOST        — Ollama (e.g. http://localhost:11434)",
-    );
-    process.exit(1);
-  }
 
   // Seleccionar provider (prioridad: cloud primero, luego locales)
   let provider: LLMProvider;
@@ -47,13 +35,13 @@ export async function startup(): Promise<void> {
     provider = createProvider({ type: "anthropic", apiKey: anthropicKey });
   } else if (openaiKey) {
     provider = createProvider({ type: "openai", apiKey: openaiKey });
-  } else if (lmStudioHost) {
-    provider = createProvider({ type: "lmstudio", baseURL: lmStudioHost });
+  } else if (ollamaHost) {
+    provider = createProvider({ type: "ollama", baseURL: ollamaHost });
   } else if (llamaCppHost) {
     provider = createProvider({ type: "llamacpp", baseURL: llamaCppHost });
   } else {
-    // ollamaHost is guaranteed defined by the guard above
-    provider = createProvider({ type: "ollama", baseURL: ollamaHost! });
+    // Default: LM Studio en localhost:1234 (o LM_STUDIO_HOST si está definida)
+    provider = createProvider({ type: "lmstudio", baseURL: lmStudioHost });
   }
 
   console.error(`Using LLM provider: ${provider.name}`);

@@ -347,6 +347,40 @@ describe("runHealthChecks", () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  it("SSRF: LM_STUDIO_HOST con protocolo file:// no hace fetch y retorna null-like", async () => {
+    // file:// no es http/https — detectLlmProviderUrl debe ignorarlo
+    let fetchCalled = false;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      fetchCalled = true;
+      return { ok: true, status: 200 } as Response;
+    };
+    try {
+      const result = await checkProviderConnectivity({ LM_STUDIO_HOST: "file:///etc/passwd" });
+      expect(fetchCalled).toBe(false);
+      // Sin URL válida, cae en la rama de API-key providers → ok: false, no provider
+      expect(result.ok).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("SSRF: OLLAMA_HOST con esquema javascript: no hace fetch", async () => {
+    let fetchCalled = false;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      fetchCalled = true;
+      return { ok: true, status: 200 } as Response;
+    };
+    try {
+      const result = await checkProviderConnectivity({ OLLAMA_HOST: "javascript:alert(1)" });
+      expect(fetchCalled).toBe(false);
+      expect(result.ok).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
 
 // ─── onUpdate markers tests ───────────────────────────────────────────────────
@@ -722,7 +756,7 @@ describe("C4: recovery tras crash del agente", () => {
   });
 });
 
-// ─── C-1: SIGINT ─────────────────────────────────────────────────────────────
+// ─── C1: SIGINT ─────────────────────────────────────────────────────────────
 
 describe("C1: SIGINT llama shutdown", () => {
   it("SIGINT emitido llama agentProcess.kill()", async () => {
@@ -760,5 +794,190 @@ describe("C1: SIGINT llama shutdown", () => {
 
     // Limpiar el handler para no afectar otros tests
     process.removeAllListeners("SIGINT");
+  });
+});
+
+// ─── D-02: Health check sin sendPrompt ───────────────────────────────────────
+
+describe("D-02: runHealthChecks usa env vars, no sendPrompt", () => {
+  it("start() no llama a sendPrompt durante el health check", async () => {
+    const { renderer } = makeRenderer();
+    const { input } = makeInput();
+
+    let sendPromptCalled = false;
+    const acpClient: IAcpClient = {
+      ...makeAcpClient(),
+      sendPrompt: async () => { sendPromptCalled = true; },
+    };
+
+    const deps = makeDeps({ renderer, input, acpClient, env: {} });
+    const orchestrator = createTuiOrchestrator(deps);
+    await orchestrator.start();
+
+    expect(sendPromptCalled).toBe(false);
+  });
+
+  it("muestra '✓ LLM provider configurado: Anthropic' cuando ANTHROPIC_API_KEY está definida", async () => {
+    const { renderer, calls } = makeRenderer();
+    const { input } = makeInput();
+
+    const deps = makeDeps({ renderer, input, env: { ANTHROPIC_API_KEY: "sk-test" } });
+    const orchestrator = createTuiOrchestrator(deps);
+    await orchestrator.start();
+
+    const systemMessages = calls
+      .filter((c) => c.method === "renderSystemMessage")
+      .map((c) => c.args[0] as string);
+
+    expect(systemMessages.some((m) => m.includes("✓ LLM provider configurado: Anthropic"))).toBe(true);
+  });
+
+  it("muestra '✓ LLM provider configurado: OpenAI' cuando OPENAI_API_KEY está definida", async () => {
+    const { renderer, calls } = makeRenderer();
+    const { input } = makeInput();
+
+    const deps = makeDeps({ renderer, input, env: { OPENAI_API_KEY: "sk-test" } });
+    const orchestrator = createTuiOrchestrator(deps);
+    await orchestrator.start();
+
+    const systemMessages = calls
+      .filter((c) => c.method === "renderSystemMessage")
+      .map((c) => c.args[0] as string);
+
+    expect(systemMessages.some((m) => m.includes("✓ LLM provider configurado: OpenAI"))).toBe(true);
+  });
+
+  it("muestra '⚠ Sin provider LLM configurado' cuando no hay env vars LLM", async () => {
+    const { renderer, calls } = makeRenderer();
+    const { input } = makeInput();
+
+    const deps = makeDeps({ renderer, input, env: {} });
+    const orchestrator = createTuiOrchestrator(deps);
+    await orchestrator.start();
+
+    const systemMessages = calls
+      .filter((c) => c.method === "renderSystemMessage")
+      .map((c) => c.args[0] as string);
+
+    expect(systemMessages.some((m) => m.includes("⚠ Sin provider LLM configurado"))).toBe(true);
+  });
+});
+
+// ─── D-01: STATUS y ERR markers en onUpdate ──────────────────────────────────
+
+describe("D-01: STATUS_MARKER y ERR_MARKER en onUpdate", () => {
+  function makeAcpClientWithUpdateCapture() {
+    let capturedHandler: ((payload: SessionUpdatePayload) => void) | null = null;
+    const acpClient: IAcpClient = {
+      ...makeAcpClient(),
+      onUpdate: (h) => { capturedHandler = h; },
+    };
+    return {
+      acpClient,
+      triggerUpdate(text: string) {
+        capturedHandler?.({
+          sessionId: "test-session",
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text },
+          },
+        });
+      },
+    };
+  }
+
+  it("STATUS_MARKER chunk llama renderSystemMessage, no renderStreamChunk", async () => {
+    const { acpClient, triggerUpdate } = makeAcpClientWithUpdateCapture();
+    const { renderer, calls } = makeRenderer();
+    const { input } = makeInput();
+
+    const deps = makeDeps({ acpClient, renderer, input, env: {} });
+    const orchestrator = createTuiOrchestrator(deps);
+    await orchestrator.start();
+
+    calls.length = 0;
+    triggerUpdate("\x00STATUS\x00Analizando tu solicitud...");
+
+    expect(calls.some((c) => c.method === "renderSystemMessage" && (c.args[0] as string).includes("Analizando"))).toBe(true);
+    expect(calls.some((c) => c.method === "renderStreamChunk")).toBe(false);
+  });
+
+  it("ERR_MARKER chunk llama renderError, no renderStreamChunk", async () => {
+    const { acpClient, triggerUpdate } = makeAcpClientWithUpdateCapture();
+    const { renderer, calls } = makeRenderer();
+    const { input } = makeInput();
+
+    const deps = makeDeps({ acpClient, renderer, input, env: {} });
+    const orchestrator = createTuiOrchestrator(deps);
+    await orchestrator.start();
+
+    calls.length = 0;
+    triggerUpdate("\x00ERR\x00Algo salió mal");
+
+    expect(calls.some((c) => c.method === "renderError" && (c.args[0] as string).includes("Algo salió mal"))).toBe(true);
+    expect(calls.some((c) => c.method === "renderStreamChunk")).toBe(false);
+  });
+});
+
+// ─── D-04: agentName prefix en mensajes del agente ───────────────────────────
+
+describe("D-04: agentName prefix en renderAgentMessageStart", () => {
+  function makeAcpClientWithUpdateCapture() {
+    let capturedHandler: ((payload: SessionUpdatePayload) => void) | null = null;
+    const acpClient: IAcpClient = {
+      ...makeAcpClient(),
+      onUpdate: (h) => { capturedHandler = h; },
+    };
+    return {
+      acpClient,
+      triggerUpdate(text: string) {
+        capturedHandler?.({
+          sessionId: "test-session",
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text },
+          },
+        });
+      },
+    };
+  }
+
+  it("ROUTING_MARKER actualiza lastRoutedAgent y se pasa a renderAgentMessageStart", async () => {
+    const { acpClient, triggerUpdate } = makeAcpClientWithUpdateCapture();
+    const { renderer, calls } = makeRenderer();
+    const { input } = makeInput();
+
+    const deps = makeDeps({ acpClient, renderer, input, env: {} });
+    const orchestrator = createTuiOrchestrator(deps);
+    await orchestrator.start();
+
+    calls.length = 0;
+    // Primero llega el routing marker
+    triggerUpdate("\x00ROUTING\x00code-agent");
+    // Luego llega texto normal
+    triggerUpdate("Aquí está la respuesta");
+
+    // renderAgentMessageStart debe haberse llamado con "code-agent"
+    const startCall = calls.find((c) => c.method === "renderAgentMessageStart");
+    expect(startCall).toBeDefined();
+    expect(startCall?.args[0]).toBe("code-agent");
+  });
+
+  it("sin ROUTING_MARKER previo, renderAgentMessageStart se llama con 'Agent' (default)", async () => {
+    const { acpClient, triggerUpdate } = makeAcpClientWithUpdateCapture();
+    const { renderer, calls } = makeRenderer();
+    const { input } = makeInput();
+
+    const deps = makeDeps({ acpClient, renderer, input, env: {} });
+    const orchestrator = createTuiOrchestrator(deps);
+    await orchestrator.start();
+
+    calls.length = 0;
+    // Texto normal sin routing previo
+    triggerUpdate("Respuesta directa");
+
+    const startCall = calls.find((c) => c.method === "renderAgentMessageStart");
+    expect(startCall).toBeDefined();
+    expect(startCall?.args[0]).toBe("Agent");
   });
 });

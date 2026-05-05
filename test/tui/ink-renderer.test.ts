@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import type { TuiAppState, DisplayMessage } from "../../scripts/tui/ink-renderer.tsx";
+import type { TuiAppState, DisplayMessage, SetAppState } from "../../scripts/tui/ink-renderer.tsx";
 import { InkRenderer, initialTuiAppState } from "../../scripts/tui/ink-renderer.tsx";
 import type { PermissionRequest } from "../../scripts/tui/types.ts";
 
@@ -201,10 +201,11 @@ describe("InkRenderer", () => {
 
   // ── renderRoutingInfo ───────────────────────────────────────────────────────
 
-  it("renderRoutingInfo añade {kind: 'routing', agentName}", () => {
+  it("renderRoutingInfo actualiza spinnerLabel (no añade mensaje permanente)", () => {
     renderer.renderRoutingInfo("code-agent");
-    const msgs = getState().messages;
-    expect(msgs[0]).toEqual({ kind: "routing", agentName: "code-agent" });
+    // D-03: renderRoutingInfo ya no añade mensaje permanente — actualiza el spinner label
+    expect(getState().messages).toHaveLength(0);
+    expect(getState().spinnerLabel).toBe("→ code-agent");
   });
 
   // ── renderToolCall ──────────────────────────────────────────────────────────
@@ -279,5 +280,48 @@ describe("InkRenderer", () => {
 describe("initialTuiAppState", () => {
   it("C6/M1: version inicial es '...' (no vacío)", () => {
     expect(initialTuiAppState.version).toBe("...");
+  });
+});
+
+// ─── D-03: spinnerLabel en renderRoutingInfo ──────────────────────────────────
+
+describe("D-03: spinnerLabel en renderRoutingInfo", () => {
+  let state: TuiAppState;
+  let renderer: InkRenderer;
+
+  beforeEach(() => {
+    state = { ...initialTuiAppState };
+    const setAppState: SetAppState = (updater) => {
+      state = typeof updater === "function" ? updater(state) : updater;
+    };
+    renderer = new InkRenderer(setAppState);
+  });
+
+  it("renderRoutingInfo actualiza spinnerLabel con '→ agentName'", () => {
+    renderer.renderRoutingInfo("git-agent");
+    expect(state.spinnerLabel).toBe("→ git-agent");
+  });
+
+  it("renderRoutingInfo no añade mensajes permanentes", () => {
+    renderer.renderRoutingInfo("os-agent");
+    expect(state.messages).toHaveLength(0);
+  });
+
+  it("updateSpinnerLabel actualiza spinnerLabel directamente", () => {
+    renderer.updateSpinnerLabel?.("→ docs-agent");
+    expect(state.spinnerLabel).toBe("→ docs-agent");
+  });
+
+  it("startSpinner con label setea spinnerLabel", () => {
+    renderer.startSpinner("→ code-agent");
+    expect(state.spinnerLabel).toBe("→ code-agent");
+    expect(state.isThinking).toBe(true);
+  });
+
+  it("stopSpinner resetea spinnerLabel a undefined", () => {
+    renderer.startSpinner("→ code-agent");
+    renderer.stopSpinner();
+    expect(state.spinnerLabel).toBeUndefined();
+    expect(state.isThinking).toBe(false);
   });
 });

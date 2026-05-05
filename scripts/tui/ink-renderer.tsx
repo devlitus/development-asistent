@@ -22,7 +22,7 @@ import { InputLine } from "./components/InputLine.tsx";
 
 export type DisplayMessage =
   | { kind: "user";        text: string }
-  | { kind: "agent";       text: string }
+  | { kind: "agent";       text: string; agentName?: string }
   | { kind: "system";      text: string }
   | { kind: "error";       text: string }
   | { kind: "routing";     agentName: string }
@@ -39,28 +39,32 @@ export interface TuiAppState {
   messages: DisplayMessage[];
   streamBuffer: string;
   isThinking: boolean;
+  spinnerLabel?: string;
   inputValue: string;
   inputEnabled: boolean;
   onSubmit?: (text: string) => void;
   pendingPermission?: PermissionRequest;
   onPermissionResponse?: (answer: string) => void;
   scrollOffset: number; // 0 = al final, N = N mensajes desde el final
+  currentAgentName?: string;
   /** Callbacks de scroll inyectados por InkInput.start() */
   onArrowUp?: () => void;
   onArrowDown?: () => void;
 }
 
 export const initialTuiAppState: TuiAppState = {
-  version: "",
+  version: "...",
   status: "connecting",
   messages: [],
   streamBuffer: "",
   isThinking: false,
+  spinnerLabel: undefined,
   inputValue: "",
   inputEnabled: true,
   pendingPermission: undefined,
   onPermissionResponse: undefined,
   scrollOffset: 0,
+  currentAgentName: undefined,
 };
 
 // ─── SetAppState type ─────────────────────────────────────────────────────────
@@ -103,8 +107,8 @@ export class InkRenderer implements IRenderer {
     );
   }
 
-  renderAgentMessageStart(): void {
-    this.setAppState((s) => ({ ...s, streamBuffer: "" }));
+  renderAgentMessageStart(agentName?: string): void {
+    this.setAppState((s) => ({ ...s, streamBuffer: "", currentAgentName: agentName }));
   }
 
   renderStreamChunk(chunk: string): void {
@@ -133,8 +137,9 @@ export class InkRenderer implements IRenderer {
     this.setAppState((s) => {
       if (!s.streamBuffer) return s;
       return {
-        ...this.withMessage(s, { kind: "agent", text: s.streamBuffer } satisfies DisplayMessage),
+        ...this.withMessage(s, { kind: "agent", text: s.streamBuffer, agentName: s.currentAgentName } satisfies DisplayMessage),
         streamBuffer: "",
+        currentAgentName: undefined,
       };
     });
   }
@@ -163,18 +168,21 @@ export class InkRenderer implements IRenderer {
     );
   }
 
-  startSpinner(_label?: string): void {
-    this.setAppState((s) => ({ ...s, isThinking: true }));
+  startSpinner(label?: string): void {
+    this.setAppState((s) => ({ ...s, isThinking: true, spinnerLabel: label }));
   }
 
   stopSpinner(): void {
-    this.setAppState((s) => ({ ...s, isThinking: false }));
+    this.setAppState((s) => ({ ...s, isThinking: false, spinnerLabel: undefined }));
+  }
+
+  updateSpinnerLabel(label: string): void {
+    this.setAppState((s) => ({ ...s, spinnerLabel: label }));
   }
 
   renderRoutingInfo(agentName: string): void {
-    this.setAppState((s) =>
-      this.withMessage(s, { kind: "routing", agentName } satisfies DisplayMessage),
-    );
+    // Update spinner label instead of adding a permanent message
+    this.updateSpinnerLabel(`→ ${agentName}`);
   }
 
   renderToolCall(name: string, input: unknown): void {
@@ -225,9 +233,10 @@ export function TuiApp({ onReady }: TuiAppProps): React.ReactElement {
           messages={state.messages}
           streamBuffer={state.streamBuffer}
           scrollOffset={state.scrollOffset}
+          currentAgentName={state.currentAgentName}
         />
       </Box>
-      <SpinnerLine active={state.isThinking} />
+      <SpinnerLine active={state.isThinking} label={state.spinnerLabel} />
       <InputLine
         enabled={state.inputEnabled}
         onSubmit={state.onSubmit ?? (() => {})}

@@ -16,6 +16,7 @@ import type { SessionStore } from "../session-store.ts";
 import type { LLMProvider, ChatMessage } from "../../types/llm.ts";
 import type { Orchestrator } from "../../orchestrator/index.ts";
 import { asSessionId } from "../../types/persistence.ts";
+import { ERR_MARKER } from "../../orchestrator/orchestrator.ts";
 
 /** Static response text for the spike phase when no LLM is available. */
 const STATIC_RESPONSE = "Hola, soy tu asistente ACP";
@@ -221,7 +222,7 @@ export async function handleSessionPrompt(
             sessionId: params.sessionId,
             update: {
               sessionUpdate: "agent_message_chunk",
-              content: { type: "text", text: `Error: ${sanitizeErrorMessage(event.message)}` },
+              content: { type: "text", text: `${ERR_MARKER}${sanitizeErrorMessage(event.message)}` },
             },
           });
           break;
