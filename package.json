@@ -47,7 +47,7 @@
     "@types/bun": "1.2.0",
     "@types/react": "18.3.23",
     "@zed-industries/agent-client-protocol": "0.4.5",
-    "openai": "6.34.0",
+    "openai": "6.36.0",
     "toml": "4.1.1",
     "tsup": "8.5.1",
     "zod": "4.3.6"
